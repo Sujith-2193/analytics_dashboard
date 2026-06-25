@@ -103,11 +103,21 @@ def create_app(config_name: str = None) -> Flask:
                 return send_from_directory(static_folder, path)
             return send_from_directory(static_folder, 'index.html')
 
-    # Create tables (skip if they already exist)
+    # Create tables and auto-reseed if data is stale
     with app.app_context():
         try:
             db.create_all()
         except Exception:
             pass  # Tables already exist
+
+        try:
+            from .models.transaction import Transaction
+            from datetime import datetime, date, timedelta
+            latest = db.session.query(db.func.max(Transaction.transaction_date)).scalar()
+            if latest is None or latest < date.today() - timedelta(days=7):
+                from data.seed_data import seed_database as run_seed
+                run_seed()
+        except Exception:
+            pass
 
     return app
