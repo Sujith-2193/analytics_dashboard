@@ -25,7 +25,7 @@ npm install            # if deps changed
 npm run build          # → frontend/dist/
 cp -r dist/* ../backend/static/
 cd ..
-git add backend/static frontend/dist
+git add backend/static
 git commit -m "Update backend static assets with new frontend build"
 git push
 ```

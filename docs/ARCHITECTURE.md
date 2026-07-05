@@ -20,7 +20,7 @@ There are two runtime topologies:
 - **Development (recommended local path):** Vite dev server runs the React app on port `3000` and proxies `/api/*` to the Flask API on port `5001`. The two processes are separate. (`frontend/vite.config.ts`, `backend/run.py`.)
 - **Production (Railway / gunicorn / single container):** the frontend is built (`npm run build`) and its output is placed in `backend/static/`. Flask serves both the API and the SPA from one origin, so no CORS or proxy is needed. `create_app` detects `backend/static/` and, if present, registers routes for `/` and `/<path:path>` with SPA fallback to `index.html`.
 
-`backend/static/` currently contains a committed build (`index.html`, `assets/index-*.js`, `assets/index-*.css`), so the deployed app can serve the UI without a build step. `frontend/dist/` holds the same artifacts. These are build outputs checked into git for deployment convenience; the source of truth is `frontend/src/`.
+`backend/static/` currently contains a committed build (`index.html`, `assets/index-*.js`, `assets/index-*.css`), so the deployed app can serve the UI without a build step. `frontend/dist/` is the local Vite build output that gets copied into `backend/static/`, but it is git-ignored (`frontend/.gitignore`) and not committed — only the copy under `backend/static/` is checked into git. That committed bundle is a build output kept for deployment convenience; the source of truth is `frontend/src/`.
 
 ## Backend structure
 
