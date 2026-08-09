@@ -3,11 +3,15 @@ import { createContext, useContext, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { subDays, subMonths, startOfYear, format } from 'date-fns';
 import type { DateRange, FilterState } from '../types';
+import { today as currentDate } from '../services/staticData';
 
 type DatePreset = 'last7d' | 'last30d' | 'last90d' | 'ytd' | 'lastYear' | 'custom';
 
 function getDateRangeFromPreset(preset: DatePreset): DateRange {
-  const today = new Date();
+  // Live, this is the actual date. In the static demo it is the date the
+  // snapshot was taken, so a preset resolves to the window the snapshot holds
+  // rather than to a window that moved past it overnight.
+  const today = currentDate();
   const formatDate = (date: Date) => format(date, 'yyyy-MM-dd');
 
   switch (preset) {
@@ -62,15 +66,25 @@ interface FilterContextType {
 
 const FilterContext = createContext<FilterContextType | undefined>(undefined);
 
-const defaultFilters: FilterState = {
-  dateRange: getDateRangeFromPreset('last90d'),
-  region: undefined,
-  segment: undefined,
-  category: undefined,
-};
+/**
+ * Built on demand, never at module load.
+ *
+ * A module-level constant would resolve its date range the moment this file is
+ * imported, which in the static demo is before the snapshot manifest has said
+ * what "today" is. The default range would then be computed against the real
+ * clock and miss the snapshot, while every range the user picked afterwards hit.
+ */
+function makeDefaultFilters(): FilterState {
+  return {
+    dateRange: getDateRangeFromPreset('last90d'),
+    region: undefined,
+    segment: undefined,
+    category: undefined,
+  };
+}
 
 export function FilterProvider({ children }: { children: ReactNode }) {
-  const [filters, setFilters] = useState<FilterState>(defaultFilters);
+  const [filters, setFilters] = useState<FilterState>(makeDefaultFilters);
 
   const setDateRange = useCallback((range: DateRange) => {
     setFilters((prev) => ({ ...prev, dateRange: range }));
@@ -96,7 +110,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetFilters = useCallback(() => {
-    setFilters(defaultFilters);
+    setFilters(makeDefaultFilters());
   }, []);
 
   return (

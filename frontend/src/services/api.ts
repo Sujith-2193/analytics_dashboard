@@ -9,6 +9,9 @@
  * API Base URL:
  * - Development: Uses VITE_API_URL env var or defaults to '/api'
  * - Production: Relative '/api' path (same-origin with Flask backend)
+ * - Static demo: VITE_STATIC_DATA=true reads pre-generated JSON instead of the
+ *   network. See services/staticData.ts. Every function below is unchanged in
+ *   that mode; only the transport differs.
  *
  * Usage Example:
  *   const data = await revenueApi.getTrends({ startDate: '2024-01-01', endDate: '2024-12-31' });
@@ -34,12 +37,22 @@ import type {
   ChurnRiskCustomer,
   DateRange,
 } from '../types';
+import { IS_STATIC, fetchStatic } from './staticData';
 
-/** Base URL for API requests - configurable via environment variable */
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+/**
+ * Base URL for API requests - configurable via environment variable.
+ *
+ * Pinned in static mode: the path is the snapshot's cache key, so letting a
+ * stray VITE_API_URL prepend a host would change every key and miss every file.
+ */
+const API_BASE = IS_STATIC ? '/api' : import.meta.env.VITE_API_URL || '/api';
 
 /**
  * Generic fetch wrapper with error handling and JSON parsing
+ *
+ * The single point where the static demo diverges from the live app. Routing
+ * here rather than per-function means the two modes cannot drift: any endpoint
+ * added below is snapshotted by the same rule as every other.
  *
  * @param endpoint - API endpoint path (e.g., '/dashboard/summary')
  * @param options - Standard fetch options (method, headers, body, etc.)
@@ -47,6 +60,10 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api';
  * @throws Error with message from server on non-2xx response
  */
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  if (IS_STATIC) {
+    return fetchStatic<T>(`${API_BASE}${endpoint}`);
+  }
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     headers: {
       'Content-Type': 'application/json',
@@ -307,15 +324,51 @@ export const forecastingApi = {
       })}`
     ),
 
+  /**
+   * Measured metrics for both trained models.
+   *
+   * The nested `revenue` and `churn` objects are the real shape. This type used
+   * to declare a flat one with a `confidence` field the endpoint has never
+   * returned, so the UI rendered `undefined%` on the page and TypeScript had no
+   * way to catch it. The flat keys are kept because the endpoint still returns
+   * them as a summary, but the nested objects are what to read.
+   */
   getModelPerformance: (dateRange?: DateRange) =>
     fetchApi<{
+      available: boolean;
       accuracy: number;
       mape: number;
       r2Score: number;
       rmse: number;
       dataPoints: string;
-      lastUpdate: string;
-      confidence: number;
+      revenue?: {
+        model: string;
+        validation: string;
+        mape: number;
+        naiveMape: number;
+        seasonalNaiveMape: number;
+        improvementOverNaive: number;
+        rmse: number;
+        mae: number;
+        r2Score: number;
+        trainMonths: number;
+        holdoutMonths: number;
+      };
+      churn?: {
+        model: string;
+        validation: string;
+        rocAuc: number;
+        accuracy: number;
+        precision: number;
+        recall: number;
+        f1: number;
+        averagePrecision: number;
+        brierScore: number;
+        baseRate: number;
+        trainRows: number;
+        holdoutRows: number;
+        topFeatures: Record<string, number>;
+      };
     }>(
       `/forecasting/model-performance${buildQueryString({
         start_date: dateRange?.startDate,
