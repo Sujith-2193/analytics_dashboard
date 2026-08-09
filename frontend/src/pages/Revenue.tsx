@@ -166,7 +166,6 @@ export function Revenue() {
               data={chartRegionData}
               xKey="region"
               yKeys={['revenue']}
-              colorByValue
             />
           </ChartCard>
         </div>
@@ -182,7 +181,6 @@ export function Revenue() {
               data={chartCategoryData}
               xKey="category"
               yKeys={['value']}
-              colorByValue
               horizontal
             />
           </ChartCard>

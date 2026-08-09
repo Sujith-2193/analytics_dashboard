@@ -113,24 +113,24 @@ export function Dashboard() {
         <div className="flex-shrink-0 grid grid-cols-4 gap-2">
           <KPICard
             label="Total Revenue"
-            value={kpis.totalRevenue?.value || 25000000}
-            changePercent={kpis.totalRevenue?.changePercent || 12.5}
+            value={kpis.totalRevenue?.value ?? null}
+            changePercent={kpis.totalRevenue?.changePercent ?? null}
             format="currency"
             icon={<DollarSign className="h-4 w-4" />}
             loading={summaryLoading}
           />
           <KPICard
             label="Total Customers"
-            value={kpis.totalCustomers?.value || 500}
-            changePercent={kpis.totalCustomers?.changePercent || 8.3}
+            value={kpis.totalCustomers?.value ?? null}
+            changePercent={kpis.totalCustomers?.changePercent ?? null}
             format="number"
             icon={<Users className="h-4 w-4" />}
             loading={summaryLoading}
           />
           <KPICard
             label="Pipeline Value"
-            value={kpis.pipelineValue?.value || 35000000}
-            changePercent={kpis.pipelineValue?.changePercent || 8.5}
+            value={kpis.pipelineValue?.value ?? null}
+            changePercent={kpis.pipelineValue?.changePercent ?? null}
             format="currency"
             icon={<TrendingUp className="h-4 w-4" />}
             loading={summaryLoading}
@@ -232,7 +232,7 @@ export function Dashboard() {
               xKey="date"
               yKeys={['revenue']}
               labels={{ revenue: 'Revenue' }}
-              colors={['#06B6D4']}
+              colors={['var(--color-chart-2)']}
               formatXAsDate
             />
           </ChartCard>

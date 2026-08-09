@@ -1,5 +1,62 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+ * Chart tokens, LIGHT mode.
+ *
+ * Declared in :root rather than @theme on purpose. Tailwind v4's @theme only
+ * emits a variable when a generated utility class references it, and these are
+ * consumed as raw var() inside inline styles and Recharts props. It silently
+ * dropped --color-ordinal-2 and --color-ordinal-4, which made two of the five
+ * funnel bars render with no background at all, plus two of the four status
+ * colours. A plain :root block always emits.
+ *
+ * Values are unchanged and still the validated set: the categorical palette
+ * passes the six-check validator against #ffffff, and the ordinal ramp passes
+ * --ordinal against the same surface.
+ * ------------------------------------------------------------------------- */
+:root {
+  /* Categorical. Fixed slot order is the colour-vision-deficiency mechanism;
+     assign in order and never cycle. A 9th series folds into "Other". */
+  --color-chart-1: #2a78d6;  /* blue    */
+  --color-chart-2: #eb6834;  /* orange  */
+  --color-chart-3: #1baf7a;  /* aqua    */
+  --color-chart-4: #eda100;  /* yellow  */
+  --color-chart-5: #e87ba4;  /* magenta */
+  --color-chart-6: #008300;  /* green   */
+  --color-chart-7: #4a3aa7;  /* violet  */
+  --color-chart-8: #e34948;  /* red     */
+
+  /* Ordinal ramp for ORDERED categories only (funnel stages, tiers).
+     Light tops out at five steps: a sixth cannot keep a visible lightness gap
+     and still clear the contrast floor against white. */
+  --color-ordinal-1: #86b6ef;
+  --color-ordinal-2: #5598e7;
+  --color-ordinal-3: #2a78d6;
+  --color-ordinal-4: #1c5cab;
+  --color-ordinal-5: #104281;
+
+  /* Ink for a label sitting ON each ramp step.
+     White throughout, Ryan's call 2026-08-09. Measured contrast against the
+     light ramp runs 2.1 / 3.0 / 4.4 / 6.6 / 9.9 to 1, so the first two steps
+     sit under the 4.5:1 bar. Flipping any step back is a one-line change. */
+  --color-ordinal-1-ink: #ffffff;
+  --color-ordinal-2-ink: #ffffff;
+  --color-ordinal-3-ink: #ffffff;
+  --color-ordinal-4-ink: #ffffff;
+  --color-ordinal-5-ink: #ffffff;
+
+  /* Chrome. Recessive by design. */
+  --color-grid: #e5e7eb;
+  --color-axis: #d1d5db;
+  --color-ink-muted: #6b7280;
+
+  /* Status. Reserved for good/warning/serious/critical, never a series. */
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+}
+
 @theme {
   /* Primary Colors - Blue */
   --color-primary-50: #EFF6FF;
@@ -22,16 +79,6 @@
   --color-danger-light: #FEE2E2;
   --color-info: #0EA5E9;
   --color-info-light: #E0F2FE;
-
-  /* Chart Colors - Blue-focused with diverse accent colors */
-  --color-chart-1: #3B82F6;
-  --color-chart-2: #06B6D4;
-  --color-chart-3: #10B981;
-  --color-chart-4: #F59E0B;
-  --color-chart-5: #EF4444;
-  --color-chart-6: #8B5CF6;
-  --color-chart-7: #14B8A6;
-  --color-chart-8: #F97316;
 
   /* Fonts */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
@@ -60,6 +107,46 @@ body {
 #root {
   height: 100%;
   overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+ * DARK mode series palette.
+ *
+ * These are the same eight hues re-stepped for the dark surface (#111827) and
+ * validated as a set against it. Dark mode is *selected*, not an automatic
+ * inversion of the light values - flipping a light palette onto a dark surface
+ * is what pushes steps out of the lightness band.
+ * ------------------------------------------------------------------------- */
+html.dark {
+  --color-chart-1: #3987e5;
+  --color-chart-2: #d95926;
+  --color-chart-3: #199e70;
+  --color-chart-4: #c98500;
+  --color-chart-5: #d55181;
+  --color-chart-6: #008300;
+  --color-chart-7: #9085e9;
+  --color-chart-8: #e66767;
+
+  /* Dark surface tolerates a sixth ordinal step; light does not. */
+  --color-ordinal-1: #cde2fb;
+  --color-ordinal-2: #9ec5f4;
+  --color-ordinal-3: #6da7ec;
+  --color-ordinal-4: #3987e5;
+  --color-ordinal-5: #256abf;
+  --color-ordinal-6: #184f95;
+
+  /* White throughout here too. The dark ramp is paler at the top, so the
+     first steps measure 1.3 / 1.8 / 2.5 to 1. */
+  --color-ordinal-1-ink: #ffffff;
+  --color-ordinal-2-ink: #ffffff;
+  --color-ordinal-3-ink: #ffffff;
+  --color-ordinal-4-ink: #ffffff;
+  --color-ordinal-5-ink: #ffffff;
+  --color-ordinal-6-ink: #ffffff;
+
+  --color-grid: #1f2937;
+  --color-axis: #374151;
+  --color-ink-muted: #9ca3af;
 }
 
 html.dark body {

@@ -10,21 +10,37 @@ import {
   Cell,
 } from 'recharts';
 import { currencyAxisFormatter, formatCurrency, numberAxisFormatter } from '../../utils/formatters';
-import { CHART_COLORS } from '../../utils/formatters';
+import { CHART_CHROME, getChartColor, getOrdinalColor } from '../../utils/formatters';
 
 interface BarChartProps<T> {
   data: T[];
   xKey: keyof T;
   yKeys: (keyof T)[];
   labels?: Record<string, string>;
-  colors?: string[];
   height?: number | '100%';
   showGrid?: boolean;
+  /**
+   * Optional per-series colour override, in slot order.
+   *
+   * Entries past the end fall through to the standard palette slot for that
+   * index. There is no modulo: cycling a short override across many series
+   * repaints identities the reader has already learned.
+   */
+  colors?: string[];
   showLegend?: boolean;
   formatY?: 'currency' | 'number' | 'percent';
   horizontal?: boolean;
   stacked?: boolean;
-  colorByValue?: boolean;
+  /**
+   * Set only when the bars are ORDERED bins - value ranges, tiers, age bands.
+   * Renders the single-hue ordinal ramp.
+   *
+   * Leave unset for nominal categories (regions, product categories, segments).
+   * One series gets one colour there: giving each bar its own hue would
+   * double-encode magnitude that bar length already carries, burn the only
+   * free channel to say nothing new, and cycle hues past the eighth slot.
+   */
+  ordinal?: boolean;
   angledLabels?: boolean;
   formatXAsDate?: boolean;
 }
@@ -40,17 +56,28 @@ export function BarChart<T extends Record<string, unknown>>({
   xKey,
   yKeys,
   labels = {},
-  colors = CHART_COLORS,
   height = '100%',
   showGrid = true,
-  showLegend = false,
+  colors,
+  showLegend,
   formatY = 'currency',
   horizontal = false,
   stacked = false,
-  colorByValue = false,
+  ordinal = false,
   angledLabels = false,
   formatXAsDate = false,
 }: BarChartProps<T>) {
+  /** Override wins for the slots it covers; the palette fills the rest. */
+  const seriesColor = (i: number) => colors?.[i] ?? getChartColor(i);
+
+  /*
+   * A legend is always present for two or more series, so identity never rests
+   * on colour alone. It defaults off for a single series because the card title
+   * already names it and a one-entry legend is chrome with no content. An
+   * explicit prop still wins either way.
+   */
+  const legendVisible = showLegend ?? yKeys.length >= 2;
+
   const formatAxis = formatY === 'currency' ? currencyAxisFormatter : numberAxisFormatter;
   const formatTooltip = formatY === 'currency' ? formatCurrency : (v: number) => v.toLocaleString();
 
@@ -61,12 +88,12 @@ export function BarChart<T extends Record<string, unknown>>({
       margin={{ top: 0, right: 0, left: 50, bottom: 0 }}
     >
       {showGrid && (
-        <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} />
+        <CartesianGrid stroke={CHART_CHROME.grid} strokeWidth={1} horizontal={false} />
       )}
 
       <XAxis
         type="number"
-        stroke="#6B7280"
+        stroke={CHART_CHROME.mutedInk}
         fontSize={12}
         tickLine={false}
         axisLine={false}
@@ -76,7 +103,7 @@ export function BarChart<T extends Record<string, unknown>>({
       <YAxis
         type="category"
         dataKey={String(xKey)}
-        stroke="#6B7280"
+        stroke={CHART_CHROME.mutedInk}
         fontSize={12}
         tickLine={false}
         axisLine={false}
@@ -98,7 +125,7 @@ export function BarChart<T extends Record<string, unknown>>({
         ]}
       />
 
-      {showLegend && (
+      {legendVisible && (
         <Legend
           wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
           formatter={(value) => labels[value] || value}
@@ -110,12 +137,12 @@ export function BarChart<T extends Record<string, unknown>>({
           key={String(key)}
           dataKey={String(key)}
           stackId={stacked ? 'stack' : undefined}
-          fill={colors[index % colors.length]}
+          fill={seriesColor(index)}
           radius={[0, 4, 4, 0]}
         >
-          {colorByValue &&
+          {ordinal &&
             data.map((_, i) => (
-              <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />
+              <Cell key={`cell-${i}`} fill={getOrdinalColor(i, data.length)} />
             ))}
         </Bar>
       ))}
@@ -126,12 +153,12 @@ export function BarChart<T extends Record<string, unknown>>({
       margin={{ top: 0, right: 0, left: 0, bottom: angledLabels ? 60 : 0 }}
     >
       {showGrid && (
-        <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+        <CartesianGrid stroke={CHART_CHROME.grid} strokeWidth={1} vertical={false} />
       )}
 
       <XAxis
         dataKey={String(xKey)}
-        stroke="#6B7280"
+        stroke={CHART_CHROME.mutedInk}
         fontSize={10}
         tickLine={false}
         axisLine={false}
@@ -143,7 +170,7 @@ export function BarChart<T extends Record<string, unknown>>({
       />
 
       <YAxis
-        stroke="#6B7280"
+        stroke={CHART_CHROME.mutedInk}
         fontSize={12}
         tickLine={false}
         axisLine={false}
@@ -166,7 +193,7 @@ export function BarChart<T extends Record<string, unknown>>({
         ]}
       />
 
-      {showLegend && (
+      {legendVisible && (
         <Legend
           wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
           formatter={(value) => labels[value] || value}
@@ -178,12 +205,12 @@ export function BarChart<T extends Record<string, unknown>>({
           key={String(key)}
           dataKey={String(key)}
           stackId={stacked ? 'stack' : undefined}
-          fill={colors[index % colors.length]}
+          fill={seriesColor(index)}
           radius={[4, 4, 0, 0]}
         >
-          {colorByValue &&
+          {ordinal &&
             data.map((_, i) => (
-              <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />
+              <Cell key={`cell-${i}`} fill={getOrdinalColor(i, data.length)} />
             ))}
         </Bar>
       ))}

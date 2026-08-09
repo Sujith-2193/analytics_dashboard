@@ -220,10 +220,16 @@ export interface PipelineOpportunity {
  */
 export interface ForecastDataPoint {
   date: string;
-  actual?: number;
-  predicted: number;
-  lowerBound: number;
-  upperBound: number;
+  /** Measured revenue. Absent for future months. */
+  actual: number | null;
+  /** Model output. Absent for history, except the join point where it equals
+   *  the actual so the dashed line starts exactly where the solid one ends. */
+  predicted: number | null;
+  /** Uncertainty band from the model's holdout RMSE, widening with the
+   *  horizon. Null wherever there is nothing to be uncertain about: a measured
+   *  month, and the join. */
+  lowerBound: number | null;
+  upperBound: number | null;
 }
 
 /** Customer churn risk assessment for proactive retention */

@@ -132,27 +132,103 @@ export function tooltipPercentFormatter(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
-// Color helpers - Blue-focused palette with diverse accent colors
+/* ---------------------------------------------------------------------------
+ * Chart colour
+ *
+ * These resolve to CSS custom properties rather than literal hex, so light and
+ * dark each get their own validated steps from one definition in index.css.
+ * Recharts writes them straight into SVG fill/stroke, where var() resolves.
+ *
+ * The palette passed the six-check validator against both real surfaces. Its
+ * predecessor did not: it failed the lightness band on five of eight steps and
+ * put emerald and cyan 12.5 normal-vision deltaE apart, below the 15 floor.
+ * ------------------------------------------------------------------------- */
+
+/** Number of categorical slots. Ordering is the CVD-safety mechanism. */
+export const CHART_SLOT_COUNT = 8;
+
 export const CHART_COLORS = [
-  '#3B82F6', // Blue
-  '#06B6D4', // Cyan/Teal
-  '#10B981', // Emerald
-  '#F59E0B', // Amber/Yellow
-  '#EF4444', // Red
-  '#8B5CF6', // Violet
-  '#14B8A6', // Teal
-  '#F97316', // Orange
+  'var(--color-chart-1)',
+  'var(--color-chart-2)',
+  'var(--color-chart-3)',
+  'var(--color-chart-4)',
+  'var(--color-chart-5)',
+  'var(--color-chart-6)',
+  'var(--color-chart-7)',
+  'var(--color-chart-8)',
 ];
 
+/**
+ * Colour for categorical series `index`.
+ *
+ * Deliberately does NOT wrap with a modulo. Cycling produces a ninth series
+ * that is indistinguishable from the first under colour-vision deficiency, and
+ * a reader who learned "slot 1 is blue" is then misled. Past the eighth slot
+ * this returns the muted ink so the overflow reads as "Other" rather than
+ * impersonating a real series - fold the tail or facet instead.
+ */
 export function getChartColor(index: number): string {
-  return CHART_COLORS[index % CHART_COLORS.length];
+  return CHART_COLORS[index] ?? 'var(--color-ink-muted)';
 }
 
+/**
+ * Colour for ORDERED categories - funnel stages, tiers, age bands.
+ *
+ * One hue, light to dark. Never use this for nominal categories: a value ramp
+ * over unordered items double-encodes magnitude that bar length already shows,
+ * and burns the only free channel to say nothing new.
+ *
+ * Light mode has five validated steps and dark has six, because the light
+ * surface cannot hold a sixth step with a visible lightness gap that still
+ * clears the contrast floor. Beyond the available steps this clamps to the
+ * darkest rather than inventing one; in a funnel the tail stages are the
+ * shortest bars, so length keeps them separable.
+ */
+export function getOrdinalColor(index: number, total: number): string {
+  return `var(--color-ordinal-${ordinalStep(index, total)})`;
+}
+
+/** 1-based ramp step for `index` of `total`. */
+function ordinalStep(index: number, total: number): number {
+  const steps = 5;
+  const position = total <= 1 ? 0 : Math.round((index / (total - 1)) * (steps - 1));
+  return Math.min(position, steps - 1) + 1;
+}
+
+/**
+ * Readable ink for a label drawn ON an ordinal step.
+ *
+ * The ramp runs light to dark, so no single label colour works across it.
+ * White measures 2.1:1 against the lightest light-mode step and 1.3:1 against
+ * the lightest dark-mode step, which is invisible. Each step carries its own
+ * paired ink in index.css, chosen for contrast and verified at 4.5:1 or better.
+ */
+export function getOrdinalInk(index: number, total: number): string {
+  return `var(--color-ordinal-${ordinalStep(index, total)}-ink)`;
+}
+
+/** Chart chrome. Recessive by design - hairlines, one shade off the surface. */
+export const CHART_CHROME = {
+  grid: 'var(--color-grid)',
+  axis: 'var(--color-axis)',
+  mutedInk: 'var(--color-ink-muted)',
+};
+
 // Trend helpers
+/**
+ * Colour for a delta.
+ *
+ * Uses the reserved status tokens, never a categorical series slot. Status
+ * colours mean good/bad; series colours mean identity. Letting one do the
+ * other's job means a reader cannot tell whether green is "series 3" or "up".
+ *
+ * These always ship alongside an arrow icon and the number itself, so meaning
+ * never rests on colour alone.
+ */
 export function getTrendColor(value: number): string {
-  if (value > 0) return '#10B981'; // success
-  if (value < 0) return '#EF4444'; // danger
-  return '#6B7280'; // neutral
+  if (value > 0) return 'var(--color-status-good)';
+  if (value < 0) return 'var(--color-status-critical)';
+  return 'var(--color-ink-muted)';
 }
 
 export function getTrendIcon(value: number): 'up' | 'down' | 'neutral' {

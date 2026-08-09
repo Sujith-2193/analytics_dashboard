@@ -4,10 +4,27 @@ import { formatCurrency, formatNumber, formatPercent } from '../../utils/formatt
 
 interface KPICardProps {
   label: string;
-  value: number;
+  /**
+   * The measurement. `null` means the API had nothing to report, which is not
+   * the same as zero, and renders as an em-dash.
+   *
+   * Pages used to paper over a missing value with a literal placeholder
+   * (`overview?.total || 500`, `avgCycleTime || 42`). A card claiming 500
+   * customers because the request returned nothing is worse than a card
+   * admitting it does not know.
+   */
+  value: number | null;
   previousValue?: number;
   change?: number;
-  changePercent?: number;
+  /**
+   * Percentage change against the prior period.
+   *
+   * `null` is meaningful and distinct from a zero: it means the API had no
+   * prior observation to compare against, so no delta exists. Several
+   * forecasting KPIs return null for exactly this reason rather than inventing
+   * a number. Both null and undefined suppress the badge entirely.
+   */
+  changePercent?: number | null;
   format?: 'currency' | 'number' | 'percent';
   icon?: React.ReactNode;
   className?: string;
@@ -26,6 +43,7 @@ export function KPICard({
   loading = false,
 }: KPICardProps) {
   const formattedValue = (() => {
+    if (value == null) return '—';
     switch (format) {
       case 'currency':
         return formatCurrency(value, true);
@@ -36,7 +54,11 @@ export function KPICard({
     }
   })();
 
-  const trend = changePercent !== undefined
+  // Loose inequality on purpose: catches null and undefined together. Using
+  // `!== undefined` here rendered a "+0.0%" badge whenever the API sent null.
+  const hasChange = changePercent != null;
+
+  const trend = hasChange
     ? changePercent > 0
       ? 'up'
       : changePercent < 0
@@ -101,7 +123,7 @@ export function KPICard({
             {formattedValue}
           </p>
         </div>
-        {changePercent !== undefined && (
+        {hasChange && (
           <span
             className={clsx(
               'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium flex-shrink-0',

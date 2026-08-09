@@ -67,32 +67,32 @@ export function Operations() {
         <div className="flex-shrink-0 grid grid-cols-4 gap-2">
           <KPICard
             label="Pipeline Value"
-            value={pipelineKpis?.pipelineValue || 32000000}
-            changePercent={pipelineKpis?.pipelineChange || 8.5}
+            value={pipelineKpis?.pipelineValue ?? null}
+            changePercent={pipelineKpis?.pipelineChange ?? null}
             format="currency"
             icon={<TrendingUp className="h-4 w-4" />}
             loading={kpisLoading}
           />
           <KPICard
             label="Avg Cycle Time"
-            value={pipelineKpis?.avgCycleTime || 42}
-            changePercent={pipelineKpis?.cycleTimeChange || -3.2}
+            value={pipelineKpis?.avgCycleTime ?? null}
+            changePercent={pipelineKpis?.cycleTimeChange ?? null}
             format="number"
             icon={<Clock className="h-4 w-4" />}
             loading={kpisLoading}
           />
           <KPICard
             label="Win Rate"
-            value={pipelineKpis?.winRate || 12.5}
-            changePercent={pipelineKpis?.winRateChange || 2.8}
+            value={pipelineKpis?.winRate ?? null}
+            changePercent={pipelineKpis?.winRateChange ?? null}
             format="percent"
             icon={<Trophy className="h-4 w-4" />}
             loading={kpisLoading}
           />
           <KPICard
             label="Avg Deal Size"
-            value={pipelineKpis?.avgDealSize || 85000}
-            changePercent={pipelineKpis?.dealSizeChange || 5.5}
+            value={pipelineKpis?.avgDealSize ?? null}
+            changePercent={pipelineKpis?.dealSizeChange ?? null}
             format="currency"
             icon={<Target className="h-4 w-4" />}
             loading={kpisLoading}
@@ -121,7 +121,7 @@ export function Operations() {
               yKeys={['avgDays']}
               formatY="number"
               labels={{ avgDays: 'Days' }}
-              colors={['#3B82F6']}
+              colors={['var(--color-chart-1)']}
             />
           </ChartCard>
         </div>

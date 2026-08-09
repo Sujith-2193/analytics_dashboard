@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import clsx from 'clsx';
+import { IS_STATIC, getManifest } from '../../services/staticData';
 
 interface NavItem {
   name: string;
@@ -82,6 +83,16 @@ export function Sidebar() {
         <div className="absolute bottom-0 left-0 right-0 px-3 py-2 border-t border-gray-800">
           <div className="text-xs text-gray-500">
             <p>Enterprise Analytics v1.0.0</p>
+            {/*
+              The demo's data is frozen at the date it was generated, and its
+              date presets resolve against that date. Saying so is the honest
+              thing: without it the dashboard silently claims to be current.
+            */}
+            {IS_STATIC && getManifest() && (
+              <p className="mt-1 text-gray-600">
+                Static demo &middot; data as of {getManifest()!.snapshotDate}
+              </p>
+            )}
           </div>
         </div>
       )}

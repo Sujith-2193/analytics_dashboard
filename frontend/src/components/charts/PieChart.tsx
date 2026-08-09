@@ -6,14 +6,19 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { formatCurrency, formatPercentValue } from '../../utils/formatters';
-import { CHART_COLORS } from '../../utils/formatters';
+import { getChartColor } from '../../utils/formatters';
 
 interface PieChartProps<T> {
   data: T[];
   nameKey: keyof T;
   valueKey: keyof T;
-  colors?: string[];
   height?: number | '100%';
+  /**
+   * Optional per-slice colour override, in slot order. Entries past the end
+   * fall through to the standard palette slot. No modulo: cycling a short
+   * override repaints identities the reader has already learned.
+   */
+  colors?: string[];
   showLegend?: boolean;
   showLabels?: boolean;
   innerRadius?: number;
@@ -24,13 +29,16 @@ export function PieChart<T extends Record<string, unknown>>({
   data,
   nameKey,
   valueKey,
-  colors = CHART_COLORS,
   height: _height = '100%',
+  colors,
   showLegend = true,
   showLabels = false,
   innerRadius = 0,
   formatValue = 'currency',
 }: PieChartProps<T>) {
+  /** Override wins for the slots it covers; the palette fills the rest. */
+  const seriesColor = (i: number) => colors?.[i] ?? getChartColor(i);
+
   void _height; // ResponsiveContainer always uses 100%
   // Sort data by value descending for consistent display
   // Check for percentage field first, otherwise use valueKey
@@ -102,7 +110,7 @@ export function PieChart<T extends Record<string, unknown>>({
               {sortedData.map((_, index) => (
                 <Cell
                   key={`cell-${index}`}
-                  fill={colors[index % colors.length]}
+                  fill={seriesColor(index)}
                   stroke="transparent"
                 />
               ))}
@@ -140,7 +148,7 @@ export function PieChart<T extends Record<string, unknown>>({
               <div key={String(item[nameKey])} className="flex items-center gap-1.5">
                 <div
                   className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                  style={{ backgroundColor: colors[index % colors.length] }}
+                  style={{ backgroundColor: seriesColor(index) }}
                 />
                 <span className="text-xs text-gray-300 whitespace-nowrap leading-tight">
                   {String(item[nameKey])} ({percentage}%)

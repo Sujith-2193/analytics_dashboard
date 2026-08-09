@@ -9,21 +9,36 @@ import {
   Legend,
 } from 'recharts';
 import { currencyAxisFormatter, formatCurrency, formatDateShort } from '../../utils/formatters';
-import { CHART_COLORS } from '../../utils/formatters';
+import { CHART_CHROME, getChartColor } from '../../utils/formatters';
 
 interface AreaChartProps<T> {
   data: T[];
   xKey: keyof T;
   yKeys: (keyof T)[];
   labels?: Record<string, string>;
-  colors?: string[];
   height?: number | '100%';
   showGrid?: boolean;
+  /**
+   * Optional per-series colour override, in slot order.
+   *
+   * Entries past the end fall through to the standard palette slot for that
+   * index. There is no modulo: cycling a short override across many series
+   * repaints identities the reader has already learned.
+   */
+  colors?: string[];
   showLegend?: boolean;
   formatY?: 'currency' | 'number' | 'percent';
   stacked?: boolean;
   gradient?: boolean;
   dashedKeys?: (keyof T)[];
+  /**
+   * Draw an uncertainty band between two keys, behind the series lines.
+   *
+   * Points where either bound is null are skipped, so a band can cover only the
+   * forecast portion of a series while the measured history has none. Measured
+   * values carry no uncertainty to draw.
+   */
+  band?: { lower: keyof T; upper: keyof T; label?: string };
 }
 
 export function AreaChart<T extends Record<string, unknown>>({
@@ -31,15 +46,27 @@ export function AreaChart<T extends Record<string, unknown>>({
   xKey,
   yKeys,
   labels = {},
-  colors = CHART_COLORS,
   height = '100%',
   showGrid = true,
-  showLegend = false,
+  colors,
+  showLegend,
   formatY = 'currency',
   stacked = false,
   gradient = true,
   dashedKeys = [],
+  band,
 }: AreaChartProps<T>) {
+  /** Override wins for the slots it covers; the palette fills the rest. */
+  const seriesColor = (i: number) => colors?.[i] ?? getChartColor(i);
+
+  /*
+   * A legend is always present for two or more series, so identity never rests
+   * on colour alone. It defaults off for a single series because the card title
+   * already names it and a one-entry legend is chrome with no content. An
+   * explicit prop still wins either way.
+   */
+  const legendVisible = showLegend ?? yKeys.length >= 2;
+
   const formatYAxis = formatY === 'currency' ? currencyAxisFormatter : (v: number) => v.toLocaleString();
   const formatTooltip = formatY === 'currency' ? formatCurrency : (v: number) => v.toLocaleString();
 
@@ -62,12 +89,12 @@ export function AreaChart<T extends Record<string, unknown>>({
             >
               <stop
                 offset="5%"
-                stopColor={colors[index % colors.length]}
+                stopColor={seriesColor(index)}
                 stopOpacity={0.3}
               />
               <stop
                 offset="95%"
-                stopColor={colors[index % colors.length]}
+                stopColor={seriesColor(index)}
                 stopOpacity={0}
               />
             </linearGradient>
@@ -75,12 +102,12 @@ export function AreaChart<T extends Record<string, unknown>>({
         </defs>
 
         {showGrid && (
-          <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+          <CartesianGrid stroke={CHART_CHROME.grid} strokeWidth={1} vertical={false} />
         )}
 
         <XAxis
           dataKey={String(xKey)}
-          stroke="#6B7280"
+          stroke={CHART_CHROME.mutedInk}
           fontSize={10}
           tickLine={false}
           axisLine={false}
@@ -89,7 +116,7 @@ export function AreaChart<T extends Record<string, unknown>>({
         />
 
         <YAxis
-          stroke="#6B7280"
+          stroke={CHART_CHROME.mutedInk}
           fontSize={12}
           tickLine={false}
           axisLine={false}
@@ -112,10 +139,36 @@ export function AreaChart<T extends Record<string, unknown>>({
           labelFormatter={(label) => formatDateShort(String(label))}
         />
 
-        {showLegend && (
+        {legendVisible && (
           <Legend
             wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
             formatter={(value) => labels[value] || value}
+          />
+        )}
+
+        {/* Uncertainty band, drawn first so it sits behind the lines.
+          *
+          * A range Area: the array dataKey gives Recharts a low and a high per
+          * point. Deliberately recessive - a soft fill, no stroke, no dots. The
+          * band is context for the forecast, not a series of its own, so it
+          * carries no legend entry and never competes with the data. */}
+        {band && (
+          <Area
+            type="monotone"
+            dataKey={(row: T) => {
+              const lo = row[band.lower];
+              const hi = row[band.upper];
+              return lo == null || hi == null ? null : [Number(lo), Number(hi)];
+            }}
+            name={band.label ?? 'Confidence range'}
+            stroke="none"
+            fill={seriesColor(0)}
+            fillOpacity={0.14}
+            activeDot={false}
+            dot={false}
+            legendType="none"
+            isAnimationActive={false}
+            connectNulls={false}
           />
         )}
 
@@ -125,11 +178,26 @@ export function AreaChart<T extends Record<string, unknown>>({
             type="monotone"
             dataKey={String(key)}
             stackId={stacked ? 'stack' : undefined}
-            stroke={colors[index % colors.length]}
+            stroke={seriesColor(index)}
             strokeWidth={2}
             strokeDasharray={dashedKeys.includes(key) ? '5 5' : undefined}
-            fill={gradient ? `url(#gradient-${String(key)})` : colors[index % colors.length]}
-            fillOpacity={gradient ? 1 : 0.1}
+            /*
+             * A dashed series is a projection, so it draws as a line only.
+             *
+             * Filling it was actively misleading in two ways. A filled area
+             * reads as measured volume, which a forecast is not. And where a
+             * backtest overlaps the actuals, two translucent fills stack into a
+             * smear in which neither line can be read - which is exactly what
+             * happened on the forecasting page.
+             */
+            fill={
+              dashedKeys.includes(key)
+                ? 'none'
+                : gradient
+                  ? `url(#gradient-${String(key)})`
+                  : seriesColor(index)
+            }
+            fillOpacity={dashedKeys.includes(key) ? 0 : gradient ? 1 : 0.1}
           />
         ))}
       </RechartsAreaChart>

@@ -19,13 +19,28 @@ function downloadFile(content: string, filename: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Currency for CSV cells.
+ *
+ * Deliberately without thousands separators. `Intl.NumberFormat` renders
+ * 1234567 as "$1,234,567", and those commas are field delimiters once the file
+ * reaches a spreadsheet, so a single revenue figure silently became three
+ * columns and shifted every heading after it out of alignment.
+ */
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
+  return `$${Math.round(value)}`;
+}
+
+/**
+ * Wrap a CSV field when it contains a delimiter, a quote, or a newline, and
+ * double any embedded quotes. This is the RFC 4180 rule.
+ */
+function csv(value: unknown): string {
+  const text = String(value ?? '');
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }
 
 function formatDate(dateStr: string): string {
@@ -42,8 +57,8 @@ export function exportToCSV(data: ExportData): void {
 
   // Header info
   rows.push(`Analytics Dashboard Export`);
-  rows.push(`Date Range: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}`);
-  rows.push(`Generated: ${new Date().toLocaleString()}`);
+  rows.push(csv(`Date Range: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}`));
+  rows.push(csv(`Generated: ${new Date().toLocaleString()}`));
   rows.push('');
 
   // KPIs Section
@@ -70,7 +85,7 @@ export function exportToCSV(data: ExportData): void {
     rows.push('REVENUE BY CATEGORY');
     rows.push('Category,Value,Percentage');
     summary.revenueByCategory.forEach(item => {
-      rows.push(`${item.category},${formatCurrency(item.value)},${item.percentage}%`);
+      rows.push(`${csv(item.category)},${formatCurrency(item.value)},${item.percentage}%`);
     });
     rows.push('');
   }
@@ -80,7 +95,7 @@ export function exportToCSV(data: ExportData): void {
     rows.push('TOP PRODUCTS');
     rows.push('Name,Category,Revenue,Units Sold,Growth %');
     summary.topProducts.forEach(product => {
-      rows.push(`"${product.name}",${product.category},${formatCurrency(product.revenue)},${product.unitsSold},${product.growth}%`);
+      rows.push(`${csv(product.name)},${csv(product.category)},${formatCurrency(product.revenue)},${product.unitsSold},${product.growth}%`);
     });
     rows.push('');
   }
@@ -90,7 +105,7 @@ export function exportToCSV(data: ExportData): void {
     rows.push('PIPELINE SUMMARY');
     rows.push('Stage,Value,Count,Conversion Rate');
     summary.pipelineSummary.forEach(stage => {
-      rows.push(`${stage.stage},${formatCurrency(stage.value)},${stage.count},${stage.conversionRate}%`);
+      rows.push(`${csv(stage.stage)},${formatCurrency(stage.value)},${stage.count},${stage.conversionRate}%`);
     });
   }
 

@@ -7,7 +7,7 @@ import { BarChart } from '../components/charts/BarChart';
 import { DonutChart } from '../components/charts/PieChart';
 import { DataTable } from '../components/tables/DataTable';
 import { formatCurrency } from '../utils/formatters';
-import { useRevenueForecast, useChurnRisk, useSeasonality, useForecastingKpis, useModelPerformance, useRevenueAtRisk } from '../hooks/useApi';
+import { useRevenueForecast, useChurnRisk, useSeasonality, useForecastingKpis, useModelPerformance, useRevenueAtRisk, useCustomerSegments } from '../hooks/useApi';
 import { useFilters } from '../hooks/useFilters';
 
 export function Forecasting() {
@@ -20,12 +20,15 @@ export function Forecasting() {
   const { data: kpis, isLoading: kpisLoading } = useForecastingKpis();
   const { data: modelPerformance, isLoading: modelLoading } = useModelPerformance();
   const { data: revenueAtRisk, isLoading: riskLoading } = useRevenueAtRisk();
+  const { data: customerSegments, isLoading: segmentsLoading } = useCustomerSegments();
 
   // Transform forecast data
   const forecastData = (revenueForecast || []).map(item => ({
     date: item.date,
     actual: item.actual,
     predicted: item.predicted,
+    lowerBound: item.lowerBound,
+    upperBound: item.upperBound,
   }));
 
   // Transform churn risk data
@@ -39,48 +42,49 @@ export function Forecasting() {
     recommendation: customer.recommendation,
   }));
 
-  // Model metrics from API or defaults
-  const modelMetrics = modelPerformance || {
-    accuracy: 94.2,
-    mape: 5.8,
-    r2Score: 0.942,
-    rmse: 32450,
-    dataPoints: '24 mo',
-    lastUpdate: 'Dec 20',
-    confidence: 95,
-  };
+  // Measured metrics only. This object used to fall back to a literal
+  // {accuracy: 94.2, r2Score: 0.942, confidence: 95} whenever the request
+  // failed, which is the same fabrication the backend was rebuilt to remove,
+  // surviving in the frontend. A failed request now renders a dash.
+  //
+  // The tiles below deliberately show MAPE against the naive baseline rather
+  // than R². R² on a five-month chronological holdout of a near-flat series is
+  // negative here (-0.63) while MAPE is 3.58%, because R² measures against the
+  // holdout's own mean and a flat window makes that mean hard to beat. Both are
+  // real and both stay in /api/forecasting/model-performance; the pair that
+  // actually tells you whether the model is worth running is error against the
+  // baseline you would otherwise use.
+  const revenueMetrics = modelPerformance?.revenue;
+  const churnMetrics = modelPerformance?.churn;
+  const pct = (v?: number) => (v == null ? '—' : `${v.toFixed(2)}%`);
 
-  // Growth projections by quarter
-  const growthProjections = [
-    { quarter: 'Q1 2026', projected: 12.5, historical: 10.2 },
-    { quarter: 'Q2 2026', projected: 15.8, historical: 11.5 },
-    { quarter: 'Q3 2026', projected: 18.2, historical: 14.8 },
-    { quarter: 'Q4 2026', projected: 22.5, historical: 18.5 },
-  ];
+  // Quarterly actual against quarterly forecast, aggregated from the same
+  // series the chart above plots. A month counts as actual when it has one and
+  // as projected otherwise, so the join month is never counted twice.
+  const growthProjections = (() => {
+    const buckets = new Map<string, { quarter: string; historical: number; projected: number }>();
+    for (const row of revenueForecast || []) {
+      const date = new Date(`${row.date}T00:00:00`);
+      const key = `Q${Math.floor(date.getMonth() / 3) + 1} ${date.getFullYear()}`;
+      const bucket = buckets.get(key) ?? { quarter: key, historical: 0, projected: 0 };
+      if (row.actual != null) bucket.historical += row.actual;
+      else if (row.predicted != null) bucket.projected += row.predicted;
+      buckets.set(key, bucket);
+    }
+    return [...buckets.values()];
+  })();
 
-  // Revenue by segment forecast
-  const segmentForecast = [
-    { segment: 'Enterprise', value: 2850000, percentage: 45 },
-    { segment: 'Mid-Market', value: 1580000, percentage: 28 },
-    { segment: 'SMB', value: 920000, percentage: 17 },
-    { segment: 'Startup', value: 450000, percentage: 10 },
-  ];
+  // Real revenue by segment for the selected window. Previously four invented
+  // rows whose percentages the donut then computed, so the chart looked derived
+  // when nothing underneath it was.
+  const segmentForecast = (customerSegments || []).map((s) => ({
+    segment: s.segment.replace(/(^|-)([a-z])/g, (_, sep, ch) => (sep ? ' ' : '') + ch.toUpperCase()),
+    value: s.revenue,
+  }));
 
-  // Use seasonality from API or fallback
-  const seasonalData = seasonalityData || [
-    { month: 'Jan', index: 0.92 },
-    { month: 'Feb', index: 0.88 },
-    { month: 'Mar', index: 0.95 },
-    { month: 'Apr', index: 0.90 },
-    { month: 'May', index: 0.98 },
-    { month: 'Jun', index: 1.02 },
-    { month: 'Jul', index: 0.95 },
-    { month: 'Aug', index: 1.05 },
-    { month: 'Sep', index: 1.12 },
-    { month: 'Oct', index: 1.08 },
-    { month: 'Nov', index: 1.18 },
-    { month: 'Dec', index: 1.15 },
-  ];
+  // No invented fallback: an empty series renders as an empty chart, which is
+  // the honest signal that the request failed.
+  const seasonalData = seasonalityData || [];
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -95,31 +99,31 @@ export function Forecasting() {
         <div className="flex-shrink-0 grid grid-cols-4 gap-2">
           <KPICard
             label="Predicted Revenue (6mo)"
-            value={kpis?.predictedRevenue || 4500000}
-            changePercent={kpis?.predictedChange || 12.5}
+            value={kpis?.predictedRevenue ?? null}
+            changePercent={kpis?.predictedChange ?? null}
             format="currency"
             icon={<TrendingUp className="h-4 w-4" />}
             loading={kpisLoading}
           />
           <KPICard
             label="At-Risk Customers"
-            value={kpis?.atRiskCount || churnData.length || 8}
-            changePercent={kpis?.atRiskChange || -5.2}
+            value={kpis?.atRiskCount ?? (churnData.length || null)}
+            changePercent={kpis?.atRiskChange ?? null}
             format="number"
             icon={<AlertCircle className="h-4 w-4" />}
             loading={kpisLoading || churnLoading}
           />
           <KPICard
             label="Model Accuracy"
-            value={kpis?.modelAccuracy || 94.2}
-            changePercent={kpis?.accuracyChange || 1.2}
+            value={kpis?.modelAccuracy ?? null}
+            changePercent={kpis?.accuracyChange ?? null}
             format="percent"
             icon={<BarChart3 className="h-4 w-4" />}
             loading={kpisLoading}
           />
           <KPICard
             label="Forecast Period"
-            value={kpis?.forecastPeriod || 6}
+            value={kpis?.forecastPeriod ?? null}
             changePercent={kpis?.predictedChange ? kpis.predictedChange * 0.1 : 1.5}
             format="number"
             icon={<Calendar className="h-4 w-4" />}
@@ -136,22 +140,30 @@ export function Forecasting() {
             >
               <div className="mb-2 flex items-center gap-4 text-xs">
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5" style={{ backgroundColor: '#10B981' }} />
+                  <div className="w-4 h-0.5" style={{ backgroundColor: 'var(--color-chart-1)' }} />
                   <span className="text-gray-400">Actual</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5" style={{ backgroundImage: 'linear-gradient(to right, #10B981 50%, transparent 50%)', backgroundSize: '4px 2px' }} />
+                  <div className="w-4 h-0.5" style={{ backgroundImage: 'linear-gradient(to right, var(--color-chart-1) 50%, transparent 50%)', backgroundSize: '4px 2px' }} />
                   <span className="text-gray-400">Predicted</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="w-4 h-2.5 rounded-sm"
+                    style={{ backgroundColor: 'var(--color-chart-1)', opacity: 0.14 }}
+                  />
+                  <span className="text-gray-400">Forecast range</span>
                 </div>
               </div>
               <AreaChart
-                data={forecastData.filter(d => d.actual || d.predicted)}
+                data={forecastData.filter(d => d.actual != null || d.predicted != null)}
                 xKey="date"
                 yKeys={['actual', 'predicted']}
                 labels={{ actual: 'Actual Revenue', predicted: 'Predicted Revenue' }}
-                colors={['#10B981', '#10B981']}
+                colors={['var(--color-chart-1)', 'var(--color-chart-1)']}
                 showLegend={false}
                 dashedKeys={['predicted']}
+                band={{ lower: 'lowerBound', upper: 'upperBound', label: 'Forecast range' }}
               />
             </ChartCard>
           </div>
@@ -167,46 +179,57 @@ export function Forecasting() {
               yKeys={['index']}
               labels={{ index: 'Index' }}
               formatY="number"
-              colorByValue
             />
           </ChartCard>
         </div>
 
         {/* Row 3: Growth Projections + Model Performance + Segment Forecast - 30% */}
         <div className="flex-[30] min-h-0 grid grid-cols-3 gap-2">
-          <ChartCard title="Growth Projections" subtitle="Quarterly outlook">
+          <ChartCard
+            title="Quarterly Revenue"
+            subtitle="Actual and forecast"
+            loading={forecastLoading}
+          >
             <BarChart
               data={growthProjections}
               xKey="quarter"
-              yKeys={['projected', 'historical']}
-              labels={{ projected: 'Projected', historical: 'Historical' }}
-              formatY="percent"
-              colors={['#10B981', '#3B82F6']}
+              yKeys={['historical', 'projected']}
+              labels={{ historical: 'Actual', projected: 'Forecast' }}
+              formatY="currency"
+              colors={['var(--color-chart-1)', 'var(--color-chart-2)']}
             />
           </ChartCard>
 
-          <ChartCard title="Model Performance" subtitle="Accuracy metrics" loading={modelLoading}>
+          <ChartCard title="Model Performance" subtitle="Measured on holdout" loading={modelLoading}>
             <div className="h-full grid grid-cols-2 gap-3 content-center">
               <div className="text-center p-2 bg-gray-800/50 rounded-lg">
-                <div className="text-2xl font-bold text-white">{modelMetrics.accuracy}%</div>
-                <div className="text-xs text-gray-400">Accuracy</div>
+                <div className="text-2xl font-bold text-white">{pct(revenueMetrics?.mape)}</div>
+                <div className="text-xs text-gray-400">Forecast MAPE</div>
               </div>
               <div className="text-center p-2 bg-gray-800/50 rounded-lg">
-                <div className="text-2xl font-bold text-white">{modelMetrics.r2Score}</div>
-                <div className="text-xs text-gray-400">R² Score</div>
+                <div className="text-2xl font-bold text-white">{pct(revenueMetrics?.naiveMape)}</div>
+                <div className="text-xs text-gray-400">Naive baseline</div>
               </div>
               <div className="text-center p-2 bg-gray-800/50 rounded-lg">
-                <div className="text-2xl font-bold text-white">{modelMetrics.mape}%</div>
-                <div className="text-xs text-gray-400">MAPE</div>
+                <div className="text-2xl font-bold text-white">
+                  {churnMetrics?.rocAuc?.toFixed(3) ?? '—'}
+                </div>
+                <div className="text-xs text-gray-400">Churn ROC AUC</div>
               </div>
               <div className="text-center p-2 bg-gray-800/50 rounded-lg">
-                <div className="text-2xl font-bold text-white">{modelMetrics.confidence}%</div>
-                <div className="text-xs text-gray-400">Confidence</div>
+                <div className="text-2xl font-bold text-white">
+                  {revenueMetrics?.trainMonths ?? '—'} mo
+                </div>
+                <div className="text-xs text-gray-400">Training window</div>
               </div>
             </div>
           </ChartCard>
 
-          <ChartCard title="Segment Forecast" subtitle="Revenue distribution">
+          <ChartCard
+            title="Revenue by Segment"
+            subtitle="Selected period"
+            loading={segmentsLoading}
+          >
             <DonutChart
               data={segmentForecast}
               nameKey="segment"
@@ -270,33 +293,33 @@ export function Forecasting() {
               <div className="flex-1 min-h-0 flex items-center justify-between px-3 bg-danger/10 rounded-lg border border-danger/20">
                 <div>
                   <div className="text-sm font-medium text-danger">High Risk</div>
-                  <div className="text-xs text-gray-400">{revenueAtRisk?.highRisk.customers || 7} customers · {revenueAtRisk?.highRisk.threshold || '65%+ risk'}</div>
+                  <div className="text-xs text-gray-400">{revenueAtRisk?.highRisk.customers ?? '—'} customers · {revenueAtRisk?.highRisk.threshold || '65%+ risk'}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-bold text-white">{formatCurrency(revenueAtRisk?.highRisk.value || 1200000)}</div>
+                  <div className="text-lg font-bold text-white">{revenueAtRisk ? formatCurrency(revenueAtRisk.highRisk.value) : '—'}</div>
                 </div>
               </div>
               <div className="flex-1 min-h-0 flex items-center justify-between px-3 bg-warning/10 rounded-lg border border-warning/20">
                 <div>
                   <div className="text-sm font-medium text-warning">Medium Risk</div>
-                  <div className="text-xs text-gray-400">{revenueAtRisk?.mediumRisk.customers || 6} customers · {revenueAtRisk?.mediumRisk.threshold || '50-65% risk'}</div>
+                  <div className="text-xs text-gray-400">{revenueAtRisk?.mediumRisk.customers ?? '—'} customers · {revenueAtRisk?.mediumRisk.threshold || '50-65% risk'}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-bold text-white">{formatCurrency(revenueAtRisk?.mediumRisk.value || 680000)}</div>
+                  <div className="text-lg font-bold text-white">{revenueAtRisk ? formatCurrency(revenueAtRisk.mediumRisk.value) : '—'}</div>
                 </div>
               </div>
               <div className="flex-1 min-h-0 flex items-center justify-between px-3 bg-success/10 rounded-lg border border-success/20">
                 <div>
                   <div className="text-sm font-medium text-success">Low Risk</div>
-                  <div className="text-xs text-gray-400">{revenueAtRisk?.lowRisk.customers || 4} customers · {revenueAtRisk?.lowRisk.threshold || '<50% risk'}</div>
+                  <div className="text-xs text-gray-400">{revenueAtRisk?.lowRisk.customers ?? '—'} customers · {revenueAtRisk?.lowRisk.threshold || '<50% risk'}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-bold text-white">{formatCurrency(revenueAtRisk?.lowRisk.value || 320000)}</div>
+                  <div className="text-lg font-bold text-white">{revenueAtRisk ? formatCurrency(revenueAtRisk.lowRisk.value) : '—'}</div>
                 </div>
               </div>
               <div className="flex-1 min-h-0 flex items-center justify-between px-3 bg-gray-800/50 rounded-lg border border-gray-700">
                 <div className="text-sm font-medium text-gray-300">Total Revenue at Risk</div>
-                <div className="text-xl font-bold text-white">{formatCurrency(revenueAtRisk?.total || 2200000)}</div>
+                <div className="text-xl font-bold text-white">{revenueAtRisk ? formatCurrency(revenueAtRisk.total) : '—'}</div>
               </div>
             </div>
           </ChartCard>

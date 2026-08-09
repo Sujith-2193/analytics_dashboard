@@ -1,9 +1,8 @@
-import { RefreshCw, Moon, Sun, Bell, Download, X, Check, Loader2 } from 'lucide-react';
+import { RefreshCw, Moon, Sun, Bell, X } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { useFilters, type DatePreset } from '../../hooks/useFilters';
-import { exportDashboardData } from '../../utils/export';
 
 interface HeaderProps {
   title: string;
@@ -33,13 +32,10 @@ export function Header({ title, subtitle }: HeaderProps) {
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const [exportStatus, setExportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [notifications, setNotifications] = useState(mockNotifications);
   const { filters, setDatePreset } = useFilters();
   const queryClient = useQueryClient();
   const notifRef = useRef<HTMLDivElement>(null);
-  const exportRef = useRef<HTMLDivElement>(null);
 
   // Initialize dark mode on mount
   useEffect(() => {
@@ -55,9 +51,6 @@ export function Header({ title, subtitle }: HeaderProps) {
     function handleClickOutside(event: MouseEvent) {
       if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
         setShowNotifications(false);
-      }
-      if (exportRef.current && !exportRef.current.contains(event.target as Node)) {
-        setShowExportMenu(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -82,23 +75,6 @@ export function Header({ title, subtitle }: HeaderProps) {
       return newValue;
     });
   }, []);
-
-  const handleExport = useCallback(async (format: 'csv' | 'json' | 'pdf') => {
-    setShowExportMenu(false);
-    setExportStatus('loading');
-    try {
-      await exportDashboardData(format, {
-        startDate: filters.dateRange.startDate,
-        endDate: filters.dateRange.endDate,
-      });
-      setExportStatus('success');
-      setTimeout(() => setExportStatus('idle'), 2000);
-    } catch (error) {
-      console.error('Export failed:', error);
-      setExportStatus('error');
-      setTimeout(() => setExportStatus('idle'), 2000);
-    }
-  }, [filters.dateRange]);
 
   const markNotificationRead = useCallback((id: number) => {
     setNotifications(prev =>
@@ -151,55 +127,6 @@ export function Header({ title, subtitle }: HeaderProps) {
                 className={clsx('h-4 w-4', isRefreshing && 'animate-spin')}
               />
             </button>
-
-            {/* Export Dropdown */}
-            <div className="relative" ref={exportRef}>
-              <button
-                onClick={() => setShowExportMenu(!showExportMenu)}
-                disabled={exportStatus === 'loading'}
-                className={clsx(
-                  'p-1.5 rounded-md transition-colors',
-                  exportStatus === 'success'
-                    ? 'text-green-400 bg-green-900/30'
-                    : exportStatus === 'error'
-                    ? 'text-red-400 bg-red-900/30'
-                    : exportStatus === 'loading'
-                    ? 'text-gray-500'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                )}
-                aria-label="Export data"
-              >
-                {exportStatus === 'loading' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : exportStatus === 'success' ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-              </button>
-              {showExportMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-lg border border-gray-700 py-1 z-50">
-                  <button
-                    onClick={() => handleExport('csv')}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
-                  >
-                    Export as CSV
-                  </button>
-                  <button
-                    onClick={() => handleExport('json')}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
-                  >
-                    Export as JSON
-                  </button>
-                  <button
-                    onClick={() => handleExport('pdf')}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
-                  >
-                    Export as PDF
-                  </button>
-                </div>
-              )}
-            </div>
 
             {/* Notifications Dropdown */}
             <div className="relative" ref={notifRef}>

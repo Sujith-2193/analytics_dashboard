@@ -393,19 +393,18 @@ export function useForecastingKpis(
   });
 }
 
+/**
+ * Derived from the service function rather than restated.
+ *
+ * This hook used to declare its own copy of the response shape, including a
+ * `confidence` field the endpoint does not return. Two hand-maintained copies
+ * of one contract meant the compiler validated the hook against the hook, and
+ * the page rendered `undefined%` with no type error anywhere.
+ */
+type ModelPerformance = Awaited<ReturnType<typeof forecastingApi.getModelPerformance>>;
+
 export function useModelPerformance(
-  options?: Omit<
-    UseQueryOptions<{
-      accuracy: number;
-      mape: number;
-      r2Score: number;
-      rmse: number;
-      dataPoints: string;
-      lastUpdate: string;
-      confidence: number;
-    }>,
-    'queryKey' | 'queryFn'
-  >
+  options?: Omit<UseQueryOptions<ModelPerformance>, 'queryKey' | 'queryFn'>
 ) {
   const { filters } = useFilters();
 

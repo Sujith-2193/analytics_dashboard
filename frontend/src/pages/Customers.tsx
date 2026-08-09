@@ -40,7 +40,7 @@ export function Customers() {
     company: item.company || item.name,
     segment: item.segment,
     ltv: item.lifetimeValue,
-    riskScore: item.riskScore || 0.65,
+    riskScore: item.riskScore ?? null,
   }));
 
   // Transform LTV data for bar chart
@@ -63,18 +63,18 @@ export function Customers() {
   // Transform cohort data for display - 12 months
   const cohortTableData = (cohorts || []).map(cohort => ({
     cohort: cohort.cohort,
-    m0: cohort.month0 || 100,
-    m1: cohort.month1 || 0,
-    m2: cohort.month2 || 0,
-    m3: cohort.month3 || 0,
-    m4: cohort.month4 || 0,
-    m5: cohort.month5 || 0,
-    m6: cohort.month6 || 0,
-    m7: cohort.month7 || 0,
-    m8: cohort.month8 || 0,
-    m9: cohort.month9 || 0,
-    m10: cohort.month10 || 0,
-    m11: cohort.month11 || 0,
+    m0: cohort.month0 ?? null,
+    m1: cohort.month1 ?? null,
+    m2: cohort.month2 ?? null,
+    m3: cohort.month3 ?? null,
+    m4: cohort.month4 ?? null,
+    m5: cohort.month5 ?? null,
+    m6: cohort.month6 ?? null,
+    m7: cohort.month7 ?? null,
+    m8: cohort.month8 ?? null,
+    m9: cohort.month9 ?? null,
+    m10: cohort.month10 ?? null,
+    m11: cohort.month11 ?? null,
   }));
 
   return (
@@ -90,32 +90,32 @@ export function Customers() {
         <div className="flex-shrink-0 grid grid-cols-4 gap-2">
           <KPICard
             label="Active Customers"
-            value={overview?.total || 500}
-            changePercent={overview?.totalChange || 8.5}
+            value={overview?.total ?? null}
+            changePercent={overview?.totalChange ?? null}
             format="number"
             icon={<Users className="h-4 w-4" />}
             loading={overviewLoading}
           />
           <KPICard
             label="New This Period"
-            value={overview?.new || 25}
-            changePercent={overview?.newChange || 12.3}
+            value={overview?.new ?? null}
+            changePercent={overview?.newChange ?? null}
             format="number"
             icon={<UserPlus className="h-4 w-4" />}
             loading={overviewLoading}
           />
           <KPICard
             label="Churned"
-            value={overview?.churned || 3}
-            changePercent={overview?.churnedChange || -8.5}
+            value={overview?.churned ?? null}
+            changePercent={overview?.churnedChange ?? null}
             format="number"
             icon={<UserMinus className="h-4 w-4" />}
             loading={overviewLoading}
           />
           <KPICard
             label="At Risk"
-            value={overview?.atRisk || 15}
-            changePercent={overview?.atRiskChange || -5.2}
+            value={overview?.atRisk ?? null}
+            changePercent={overview?.atRiskChange ?? null}
             format="number"
             icon={<AlertTriangle className="h-4 w-4" />}
             loading={overviewLoading}
@@ -146,7 +146,6 @@ export function Customers() {
               data={segmentData}
               xKey="segment"
               yKeys={['revenue']}
-              colorByValue
             />
           </ChartCard>
 
@@ -217,7 +216,7 @@ export function Customers() {
               xKey="range"
               yKeys={['count']}
               formatY="number"
-              colorByValue
+              ordinal
             />
           </ChartCard>
         </div>
