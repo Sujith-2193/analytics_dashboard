@@ -1,7 +1,6 @@
 from flask import Blueprint, request
 from sqlalchemy import func
 from datetime import datetime, timedelta
-import random
 from app import db
 from app.models import Pipeline, SalesRep, Transaction
 
@@ -69,43 +68,39 @@ def get_pipeline():
     end = datetime.strptime(end_date, '%Y-%m-%d').date()
     period_days = (end - start).days
 
-    # Seed random based on date for consistent but varying results
-    random.seed(hash(start_date) % 10000)
-
     stages = ['lead', 'qualified', 'proposal', 'negotiation', 'closed-won']
 
-    # Get base pipeline data from actual opportunities
-    base_results = []
-    for stage in stages:
-        stage_data = db.session.query(
-            func.sum(Pipeline.amount).label('value'),
-            func.count(Pipeline.id).label('count')
-        ).filter(
-            Pipeline.stage == stage
-        ).first()
+    # One grouped query instead of five, and no post-hoc scaling.
+    #
+    # This endpoint used to read the real per-stage totals and then multiply
+    # both the value and the count by random factors (0.8-1.2 on value,
+    # 0.75-1.25 on count) plus a "period factor" derived from the length of the
+    # window. The result reported 47.8M of pipeline against 45.5M that actually
+    # existed, disagreed with the dashboard's own pipeline figure by 5M, and
+    # returned counts that moved in the opposite direction to the underlying
+    # rows. Conversion rates were computed from those invented counts.
+    rows = db.session.query(
+        Pipeline.stage,
+        func.sum(Pipeline.amount).label('value'),
+        func.count(Pipeline.id).label('count'),
+    ).filter(
+        Pipeline.stage.in_(stages)
+    ).group_by(Pipeline.stage).all()
 
-        base_value = float(stage_data.value) if stage_data.value else 0
-        base_count = stage_data.count or 0
-        base_results.append({'value': base_value, 'count': base_count})
-
-    # Apply period-based variation (different periods show different slices)
-    period_factor = min(1.0, period_days / 90)  # Scale up to 90 days
-    variation_factor = 0.6 + (period_factor * 0.6)  # 0.6 to 1.2
+    by_stage = {r.stage: r for r in rows}
 
     results = []
     prev_count = None
+    for stage in stages:
+        row = by_stage.get(stage)
+        value = float(row.value) if row and row.value else 0.0
+        count = int(row.count) if row else 0
 
-    for i, stage in enumerate(stages):
-        # Vary count and value based on period and random seed
-        count_variation = random.uniform(0.75, 1.25)
-        value_variation = random.uniform(0.8, 1.2)
-
-        count = max(1, int(base_results[i]['count'] * variation_factor * count_variation))
-        value = base_results[i]['value'] * variation_factor * value_variation
-
-        conversion_rate = 100
-        if prev_count and prev_count > 0:
-            conversion_rate = round((count / prev_count) * 100, 1)
+        # Stage-to-stage conversion, measured. The first stage has nothing
+        # upstream of it, so it has no conversion rate rather than a fake 100%.
+        conversion_rate = None
+        if prev_count:
+            conversion_rate = round(count / prev_count * 100, 1)
 
         results.append({
             'stage': stage.replace('-', ' ').title(),
@@ -113,7 +108,6 @@ def get_pipeline():
             'count': count,
             'conversionRate': conversion_rate,
         })
-
         prev_count = count
 
     return results
@@ -121,34 +115,37 @@ def get_pipeline():
 
 @bp.route('/pipeline-kpis')
 def get_pipeline_kpis():
-    """Get pipeline KPIs with change percentages."""
+    """Pipeline KPIs.
+
+    The three `*Change` fields and `avgCycleTime` are null. That is deliberate.
+
+    They used to be `random.uniform(5.0, 15.0)` and friends, with a comment
+    stating the changes were "ALWAYS non-zero" so the UI would show movement.
+    Deal cycle time was `42 + random.randint(-5, 8)` days, a constant with
+    jitter. None of it described the business.
+
+    A period-over-period delta needs a prior observation, and this application
+    stores no historical snapshots of pipeline value, win rate, or deal size.
+    Cycle time needs opportunity stage-transition timestamps, and the Pipeline
+    model has only `created_at` and `expected_close_date`. Returning null lets
+    the UI omit the figure rather than draw a fictional one.
+    """
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
 
-    # Get consistent pipeline metrics using shared function
     metrics = get_pipeline_metrics(start_date, end_date)
-
-    # Seed for change percentages (which vary by date)
-    if start_date:
-        random.seed(hash(start_date) % 10000 + 50)
-    else:
-        random.seed(42)
-
-    # Generate change percentages that vary by period - ALWAYS non-zero
-    pipeline_change = random.uniform(5.0, 15.0)
-    cycle_change = random.choice([-1, 1]) * random.uniform(2.0, 8.0)
-    win_rate_change = random.choice([-1, 1]) * random.uniform(1.5, 6.0)
-    deal_size_change = random.uniform(3.0, 12.0)
 
     return {
         'pipelineValue': round(metrics['pipelineValue'], 2),
-        'pipelineChange': round(pipeline_change, 1),
-        'avgCycleTime': 42 + random.randint(-5, 8),
-        'cycleTimeChange': round(cycle_change, 1),
         'winRate': round(metrics['winRate'], 1),
-        'winRateChange': round(win_rate_change, 1),
         'avgDealSize': round(metrics['avgDealSize'], 2),
-        'dealSizeChange': round(deal_size_change, 1),
+        # No prior-period snapshot exists to difference against. See docstring.
+        'pipelineChange': None,
+        'winRateChange': None,
+        'dealSizeChange': None,
+        # Needs stage-transition timestamps the schema does not carry.
+        'avgCycleTime': None,
+        'cycleTimeChange': None,
     }
 
 
@@ -206,32 +203,16 @@ def get_sales_performance():
     # Sort by attainment descending
     reps_data.sort(key=lambda x: x['attainment'], reverse=True)
 
-    # Ensure we show a growing organization hitting goals:
-    # Top performers exceed quota (>100%), lower performers below (<100%)
-    # This represents a healthy sales org where top performers drive results
-    random.seed(hash(start_date) % 1000 + 200)
-
-    # Adjust attainment for realistic display across all reps
-    for i, rep in enumerate(reps_data[:20]):
-        if i < 6:
-            # Top 6: Exceeding quota (110-145% range)
-            base_attainment = 145 - (i * 6)  # 145, 139, 133, 127, 121, 115
-            variation = random.uniform(-3, 5)
-            rep['attainment'] = round(base_attainment + variation, 1)
-        elif i < 12:
-            # Middle 6: Near quota (85-105% range)
-            base_attainment = 105 - ((i - 6) * 4)  # 105, 101, 97, 93, 89, 85
-            variation = random.uniform(-3, 3)
-            rep['attainment'] = round(base_attainment + variation, 1)
-        else:
-            # Bottom: Below quota (60-82% range)
-            base_attainment = 82 - ((i - 12) * 3)  # 82, 79, 76, 73, 70, 67, 64, 61
-            variation = random.uniform(-3, 3)
-            rep['attainment'] = round(base_attainment + variation, 1)
-
-        # Adjust achieved to match the attainment
-        rep['achieved'] = round(rep['quota'] * rep['attainment'] / 100, 2)
-
+    # Attainment above is measured: achieved revenue over assigned quota.
+    #
+    # It used to be discarded here. The block that stood in this place sorted
+    # the reps, then overwrote the top six with 145/139/133/127/121/115 percent,
+    # the middle six with 105 down to 85, and the rest with 82 down to 61, each
+    # plus a random jitter - and then back-solved `achieved` from the invented
+    # attainment so the two columns would agree. Its own comment read "Ensure we
+    # show a growing organization hitting goals."
+    #
+    # The leaderboard now shows how the reps actually did.
     return reps_data[:20]
 
 
@@ -271,22 +252,51 @@ def get_conversion_rates():
 
 @bp.route('/cycle-time')
 def get_cycle_time():
-    """Get average deal cycle time by stage."""
-    start_date = request.args.get('start_date')
+    """Average expected days from opportunity creation to close, by stage.
 
-    # Generate realistic cycle times that vary by period
-    if start_date:
-        random.seed(hash(start_date) % 1000)
-    else:
-        random.seed(42)
+    Measured from `created_at` and `expected_close_date` on the opportunities
+    themselves.
 
-    base_times = [8, 12, 15, 7]
-    return [
-        {'stage': 'Lead to Qualified', 'avgDays': base_times[0] + random.randint(-2, 3)},
-        {'stage': 'Qualified to Proposal', 'avgDays': base_times[1] + random.randint(-3, 4)},
-        {'stage': 'Proposal to Negotiation', 'avgDays': base_times[2] + random.randint(-4, 5)},
-        {'stage': 'Negotiation to Close', 'avgDays': base_times[3] + random.randint(-2, 3)},
-    ]
+    This is deliberately NOT stage-to-stage transition time, which is what the
+    endpoint used to claim. It reported a hardcoded [8, 12, 15, 7] days plus
+    `random.randint` jitter, reseeded off the filter string so the invented
+    numbers at least stayed stable per window. True transition time needs a
+    history of when each opportunity entered each stage, and the Pipeline model
+    carries no such timestamps, so it cannot be computed from this schema.
+
+    What is computable is how long deals currently sitting in each stage are
+    expected to take end to end, which is a real and useful figure. The label
+    says what it is.
+    """
+    stages = ['lead', 'qualified', 'proposal', 'negotiation']
+
+    rows = db.session.query(
+        Pipeline.stage,
+        func.avg(
+            func.cast(Pipeline.expected_close_date, db.Date)
+            - func.cast(Pipeline.created_at, db.Date)
+        ).label('avg_days'),
+        func.count(Pipeline.id).label('count'),
+    ).filter(
+        Pipeline.stage.in_(stages),
+        Pipeline.expected_close_date.isnot(None),
+        Pipeline.created_at.isnot(None),
+    ).group_by(Pipeline.stage).all()
+
+    by_stage = {r.stage: r for r in rows}
+
+    result = []
+    for stage in stages:
+        row = by_stage.get(stage)
+        if row is None or row.avg_days is None:
+            continue
+        result.append({
+            'stage': stage.replace('-', ' ').title(),
+            'avgDays': round(float(row.avg_days), 1),
+            'count': int(row.count),
+        })
+
+    return result
 
 
 @bp.route('/opportunities')

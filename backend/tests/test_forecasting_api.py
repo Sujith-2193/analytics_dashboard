@@ -1,0 +1,176 @@
+"""API tests for the forecasting endpoints.
+
+The regression these guard against is specific and real: this API used to
+report model accuracy, MAPE, R², RMSE, churn risk scores, and confidence
+intervals that were generated with `random.uniform()` rather than measured.
+Several tests below assert that endpoint output matches the trained model
+exactly, so any drift back toward fabrication fails the suite.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.ml import registry
+
+
+@pytest.fixture(autouse=True)
+def _fresh_registry(ctx):
+    registry.reset()
+    yield
+
+
+class TestModelPerformance:
+    def test_returns_measured_metrics(self, client, ctx):
+        payload = client.get("/api/forecasting/model-performance").get_json()
+        assert payload["available"] is True
+        assert "revenue" in payload and "churn" in payload
+
+    def test_metrics_match_the_trained_model_exactly(self, client, ctx):
+        """Not 'close to'. Identical. Anything else means the endpoint is
+        deriving numbers instead of reporting them."""
+        payload = client.get("/api/forecasting/model-performance").get_json()
+        model = registry.get_churn_model()
+        forecast = registry.get_revenue_forecast()
+
+        assert payload["churn"]["rocAuc"] == model.metrics.roc_auc
+        assert payload["churn"]["precision"] == model.metrics.precision
+        assert payload["churn"]["recall"] == model.metrics.recall
+        assert payload["revenue"]["mape"] == forecast.metrics.mape
+        assert payload["revenue"]["rmse"] == forecast.metrics.rmse
+
+    def test_reports_its_validation_method(self, client, ctx):
+        payload = client.get("/api/forecasting/model-performance").get_json()
+        assert payload["churn"]["validation"] == "stratified holdout"
+        assert payload["revenue"]["validation"] == "chronological holdout"
+
+    def test_is_stable_across_calls(self, client, ctx):
+        """The old implementation reseeded a PRNG per request, so identical
+        requests returned different accuracy figures."""
+        first = client.get("/api/forecasting/model-performance").get_json()
+        second = client.get("/api/forecasting/model-performance").get_json()
+        assert first == second
+
+    def test_ignores_date_filters(self, client, ctx):
+        """Model performance is a property of the fit, not of the window the
+        user is looking at. It used to be varied by filter for appearances."""
+        plain = client.get("/api/forecasting/model-performance").get_json()
+        filtered = client.get(
+            "/api/forecasting/model-performance?start_date=2026-01-01&end_date=2026-06-01"
+        ).get_json()
+        assert plain == filtered
+
+
+class TestRevenueForecast:
+    def test_returns_history_then_forecast(self, client, ctx):
+        """Six future points, plus the join.
+
+        The last actual month also carries a predicted value equal to its
+        actual, so the dashed forecast line starts exactly where the solid
+        history line ends instead of floating above or below it.
+        """
+        rows = client.get("/api/forecasting/revenue?periods=6").get_json()
+        assert isinstance(rows, list) and rows
+        assert sum(1 for r in rows if r["predicted"] is not None) == 7
+        assert any(r["actual"] is not None for r in rows)
+
+    def test_the_join_point_matches_the_last_actual_exactly(self, client, ctx):
+        rows = client.get("/api/forecasting/revenue?periods=6").get_json()
+        join = [r for r in rows if r["actual"] is not None and r["predicted"] is not None]
+        assert len(join) == 1
+        assert join[0]["actual"] == join[0]["predicted"]
+
+    def test_dates_are_ordered_and_monthly(self, client, ctx):
+        rows = client.get("/api/forecasting/revenue?periods=4").get_json()
+        dates = [r["date"] for r in rows]
+        assert dates == sorted(dates)
+        assert all(d.endswith("-01") for d in dates)
+
+    def test_bounds_bracket_the_prediction_and_widen(self, client, ctx):
+        """Intervals derive from holdout RMSE scaled by sqrt(horizon). They used
+        to be a random 8-12% of the value."""
+        # The join point carries no band: it is a measured actual, not a
+        # prediction, so it has no uncertainty to draw.
+        rows = [r for r in client.get("/api/forecasting/revenue?periods=6").get_json()
+                if r["predicted"] is not None and r["lowerBound"] is not None]
+        widths = []
+        for row in rows:
+            assert row["lowerBound"] <= row["predicted"] <= row["upperBound"]
+            widths.append(row["upperBound"] - row["lowerBound"])
+        assert widths[-1] > widths[0], "uncertainty should grow with horizon"
+
+    def test_lower_bound_never_negative(self, client, ctx):
+        rows = client.get("/api/forecasting/revenue?periods=12").get_json()
+        assert all(r["lowerBound"] >= 0 for r in rows if r["lowerBound"] is not None)
+
+    def test_is_stable_across_calls(self, client, ctx):
+        assert (
+            client.get("/api/forecasting/revenue?periods=6").get_json()
+            == client.get("/api/forecasting/revenue?periods=6").get_json()
+        )
+
+    def test_horizon_is_clamped(self, client, ctx):
+        rows = client.get("/api/forecasting/revenue?periods=999").get_json()
+        # 24 future points at most, plus the join.
+        assert sum(1 for r in rows if r["predicted"] is not None) <= 25
+
+
+class TestChurnRisk:
+    def test_scores_are_model_probabilities(self, client, ctx):
+        rows = client.get("/api/forecasting/churn-risk").get_json()
+        assert rows
+        for row in rows:
+            assert 0.0 <= row["riskScore"] <= 1.0
+
+    def test_sorted_by_risk_descending(self, client, ctx):
+        rows = client.get("/api/forecasting/churn-risk").get_json()
+        scores = [r["riskScore"] for r in rows]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_recency_is_real_not_invented(self, client, ctx):
+        """`daysSinceActivity` was `20 + random.randint(0, 40)`, so it could
+        never exceed 60 regardless of the account."""
+        from app.ml.features import customer_frame
+
+        frame = customer_frame().set_index("customer_id")
+        rows = client.get("/api/forecasting/churn-risk").get_json()
+        for row in rows:
+            assert row["daysSinceActivity"] == int(frame.loc[row["id"], "recency_days"])
+
+    def test_excludes_already_churned_accounts(self, client, ctx):
+        from app import db
+        from app.models import Customer
+
+        rows = client.get("/api/forecasting/churn-risk").get_json()
+        ids = [r["id"] for r in rows]
+        churned = {
+            c.id
+            for c in db.session.query(Customer).filter(Customer.status == "churned").all()
+        }
+        assert not (set(ids) & churned)
+
+    def test_is_stable_across_calls(self, client, ctx):
+        assert (
+            client.get("/api/forecasting/churn-risk").get_json()
+            == client.get("/api/forecasting/churn-risk").get_json()
+        )
+
+
+class TestRevenueAtRisk:
+    def test_buckets_are_consistent(self, client, ctx):
+        payload = client.get("/api/forecasting/revenue-at-risk").get_json()
+        total_customers = (
+            payload["highRisk"]["customers"]
+            + payload["mediumRisk"]["customers"]
+            + payload["lowRisk"]["customers"]
+        )
+        assert total_customers == payload["totalCustomers"]
+
+    def test_values_sum_to_total(self, client, ctx):
+        payload = client.get("/api/forecasting/revenue-at-risk").get_json()
+        parts = (
+            payload["highRisk"]["value"]
+            + payload["mediumRisk"]["value"]
+            + payload["lowRisk"]["value"]
+        )
+        assert abs(parts - payload["total"]) <= 3  # integer rounding per bucket

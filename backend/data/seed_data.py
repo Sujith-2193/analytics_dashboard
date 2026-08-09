@@ -9,6 +9,7 @@ Generates realistic business data including:
 - 500+ pipeline opportunities
 """
 
+import contextlib
 import os
 import sys
 from datetime import datetime, timedelta
@@ -118,32 +119,74 @@ def generate_sales_reps():
 
 
 def generate_customers():
-    """Generate customer base."""
+    """Generate customer base.
+
+    Churn is *generated from behaviour*, not rolled independently, so the
+    dataset actually contains a learnable signal. Each customer gets a latent
+    engagement score, and their churn hazard is a function of that score plus
+    segment and tenure. The label is then derived from the hazard rather than
+    assigned at random.
+
+    This matters: an earlier version of this generator drew `status` from a
+    bare `random.random()` with no relationship to any other column, which made
+    churn statistically unlearnable by construction. Any classifier trained on
+    it would have scored at the base rate, correctly.
+
+    `engagement` and `churn_date` are internal fields consumed by
+    generate_transactions(); they are not persisted to the database. Recency
+    and frequency in the transaction history are what a model actually sees.
+    """
     customers = []
 
     # Distribution: 15% enterprise, 35% mid-market, 50% SMB
     segments = ['enterprise'] * 300 + ['mid-market'] * 700 + ['smb'] * 1000
 
+    # Smaller accounts churn more often, which is the usual shape in B2B.
+    segment_hazard = {'enterprise': 0.05, 'mid-market': 0.11, 'smb': 0.19}
+
     for i in range(NUM_CUSTOMERS):
         segment = segments[i] if i < len(segments) else random.choice(SEGMENTS)
         region = random.choice(REGIONS)
+        acquisition_date = fake.date_between(start_date=START_DATE, end_date=END_DATE)
 
-        # LTV varies by segment
+        # Latent propensity to keep buying. Drives transaction frequency below,
+        # so it reaches the model only through observable behaviour.
+        engagement = random.betavariate(2.6, 2.0)
+
+        # LTV varies by segment and scales with engagement.
         if segment == 'enterprise':
-            ltv = random.randint(50000, 500000)
+            ltv = int(random.randint(50000, 500000) * (0.55 + 0.9 * engagement))
         elif segment == 'mid-market':
-            ltv = random.randint(10000, 100000)
+            ltv = int(random.randint(10000, 100000) * (0.55 + 0.9 * engagement))
         else:
-            ltv = random.randint(1000, 20000)
+            ltv = int(random.randint(1000, 20000) * (0.55 + 0.9 * engagement))
 
-        # Status distribution
-        status_roll = random.random()
-        if status_roll < 0.85:
-            status = 'active'
-        elif status_roll < 0.92:
+        # Tenure in days at the end of the window.
+        end_date = END_DATE.date() if hasattr(END_DATE, 'date') else END_DATE
+        tenure_days = max((end_date - acquisition_date).days, 0)
+
+        # Hazard: disengaged, small, and newly acquired accounts churn most.
+        hazard = segment_hazard[segment]
+        hazard *= (1.9 - 1.4 * engagement)          # engagement dominates
+        hazard *= (1.35 if tenure_days < 180 else 1.0)  # early-life churn
+        hazard += random.uniform(-0.03, 0.03)       # irreducible noise
+        hazard = min(max(hazard, 0.01), 0.85)
+
+        roll = random.random()
+        churn_date = None
+        if roll < hazard:
+            status = 'churned'
+            # Stopped buying somewhere in the back half of their tenure.
+            if tenure_days > 60:
+                offset = random.randint(30, max(31, int(tenure_days * 0.8)))
+                churn_date = acquisition_date + timedelta(days=offset)
+            else:
+                churn_date = acquisition_date + timedelta(days=15)
+        elif roll < hazard * 1.9:
+            # Still buying but decaying. generate_transactions() thins them out.
             status = 'at-risk'
         else:
-            status = 'churned'
+            status = 'active'
 
         customers.append({
             'id': i + 1,
@@ -151,11 +194,14 @@ def generate_customers():
             'company': fake.company(),
             'industry': random.choice(INDUSTRIES),
             'segment': segment,
-            'acquisition_date': fake.date_between(start_date=START_DATE, end_date=END_DATE),
+            'acquisition_date': acquisition_date,
             'acquisition_channel': random.choice(ACQUISITION_CHANNELS),
             'lifetime_value': ltv,
             'status': status,
             'region': region,
+            # internal only, stripped before insert
+            'engagement': engagement,
+            'churn_date': churn_date,
         })
 
     return customers
@@ -171,6 +217,33 @@ def generate_transactions(products, customers, sales_reps):
         5: 0.98, 6: 1.02, 7: 0.95, 8: 1.05,
         9: 1.12, 10: 1.08, 11: 1.18, 12: 1.15,
     }
+
+    # Weighted sampling pool. Engagement drives how often a customer appears,
+    # so frequency and monetary value carry real signal about churn instead of
+    # being uniform across the base.
+    end_date_d = END_DATE.date() if hasattr(END_DATE, 'date') else END_DATE
+    pool = [c for c in customers]
+    weights = [0.25 + 1.75 * c['engagement'] for c in pool]
+
+    def eligible(c, on_date):
+        """Is this customer still transacting on `on_date`?"""
+        if on_date < c['acquisition_date']:
+            return False
+        if c['churn_date'] is not None and on_date >= c['churn_date']:
+            return False
+        if c['status'] == 'at-risk':
+            # Activity decays over the final 120 days rather than stopping dead.
+            days_left = (end_date_d - on_date).days
+            if days_left < 120:
+                return random.random() < (0.15 + 0.85 * days_left / 120)
+        return True
+
+    def pick_customer(on_date, attempts=12):
+        for _ in range(attempts):
+            c = random.choices(pool, weights=weights, k=1)[0]
+            if eligible(c, on_date):
+                return c
+        return None
 
     # Generate transactions with realistic patterns
     current_date = START_DATE
@@ -199,8 +272,11 @@ def generate_transactions(products, customers, sales_reps):
             if transaction_id > NUM_TRANSACTIONS:
                 break
 
+            customer = pick_customer(current_date.date())
+            if customer is None:
+                continue
+
             product = random.choice(products)
-            customer = random.choice(customers)
             sales_rep = random.choice(sales_reps)
 
             # Quantity varies by product category
@@ -306,12 +382,19 @@ def seed_database():
     START_DATE = datetime.now() - timedelta(days=730)  # 2 years ago
     END_DATE = datetime.now()
 
+    from flask import current_app
     from app import create_app, db
     from app.models import Product, Customer, SalesRep, Transaction, Pipeline
 
-    app = create_app('development')
+    # Reuse an active application context when there is one, and only build an
+    # app when called standalone. Unconditionally calling create_app() here was
+    # half of a recursion loop with the factory's old auto-reseed block.
+    if current_app:
+        ctx = contextlib.nullcontext()
+    else:
+        ctx = create_app('development').app_context()
 
-    with app.app_context():
+    with ctx:
         print("Generating synthetic data...")
 
         # Generate data
@@ -346,10 +429,13 @@ def seed_database():
             db.session.add(rep)
         db.session.commit()
 
-        # Insert customers
+        # Insert customers. `engagement` and `churn_date` are generator-internal
+        # latents used to shape transaction history; they are deliberately not
+        # persisted, so no model can cheat by reading the label's cause directly.
         print("Inserting customers...")
+        internal_fields = ('engagement', 'churn_date')
         for c in customers_data:
-            customer = Customer(**c)
+            customer = Customer(**{k: v for k, v in c.items() if k not in internal_fields})
             db.session.add(customer)
         db.session.commit()
 

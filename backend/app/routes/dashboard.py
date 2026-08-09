@@ -1,7 +1,6 @@
 from flask import Blueprint, request
 from sqlalchemy import func, extract
 from datetime import datetime, timedelta
-import random
 from app import db
 from app.models import Transaction, Customer, Pipeline, Product
 from app.routes.operations import get_pipeline_metrics
@@ -78,38 +77,27 @@ def get_summary():
     avg_order_value = float(current_revenue) / current_orders if current_orders else 0
     prev_avg_order_value = float(prev_revenue) / prev_orders if prev_orders else 0
 
-    # Calculate changes - ALWAYS return non-zero values
-    def ensure_nonzero(value, seed_offset, min_val=3.0, max_val=12.0):
-        """Ensure value is never zero - generate random if zero."""
-        if value == 0 or value is None:
-            random.seed(hash(start_date) % 1000 + seed_offset)
-            return random.uniform(min_val, max_val)
-        return value
+    def pct_change(current, previous):
+        """Period-over-period change, or None when there is no baseline.
 
-    if prev_revenue and prev_revenue > 0:
-        revenue_change = ((float(current_revenue) - float(prev_revenue)) / float(prev_revenue) * 100)
-        revenue_change = ensure_nonzero(revenue_change, 100, 8.0, 18.0)
-    else:
-        random.seed(hash(start_date) % 1000)
-        revenue_change = random.uniform(8.0, 18.0)
+        A measured 0.0 is returned as 0.0. This used to run through a helper
+        named `ensure_nonzero` which, whenever the real change came out to
+        exactly zero, substituted `random.uniform(3.0, 12.0)` - so the one case
+        where the honest answer was "flat" was the one case guaranteed to be
+        invented. Where no prior period existed, the whole figure was random.
+        """
+        if not previous:
+            return None
+        return round((float(current) - float(previous)) / float(previous) * 100, 1)
 
-    if prev_customers and prev_customers > 0:
-        customer_change = ((current_customers - prev_customers) / prev_customers * 100)
-        customer_change = ensure_nonzero(customer_change, 101, 5.0, 15.0)
-    else:
-        random.seed(hash(start_date) % 1001)
-        customer_change = random.uniform(5.0, 15.0)
+    revenue_change = pct_change(current_revenue, prev_revenue)
+    customer_change = pct_change(current_customers, prev_customers)
+    aov_change = pct_change(avg_order_value, prev_avg_order_value)
 
-    if prev_avg_order_value and prev_avg_order_value > 0:
-        aov_change = ((avg_order_value - prev_avg_order_value) / prev_avg_order_value * 100)
-        aov_change = ensure_nonzero(aov_change, 102, 2.0, 8.0)
-    else:
-        random.seed(hash(start_date) % 1002)
-        aov_change = random.uniform(2.0, 8.0)
-
-    # Pipeline change - generate realistic value (pipeline fluctuates more)
-    random.seed(hash(start_date) % 1003)
-    pipeline_change = random.uniform(10.0, 25.0)
+    # Pipeline has no prior-period snapshot to difference against: opportunities
+    # carry a current stage and no history of what the pipeline totalled a month
+    # ago. This was `random.uniform(10.0, 25.0)`.
+    pipeline_change = None
 
     return {
         'kpis': {
@@ -117,21 +105,21 @@ def get_summary():
                 'value': float(current_revenue),
                 'previousValue': float(prev_revenue),
                 'change': float(current_revenue) - float(prev_revenue),
-                'changePercent': round(revenue_change, 1),
+                'changePercent': revenue_change,
             },
             'totalCustomers': {
                 'value': current_customers,
                 'previousValue': prev_customers,
                 'change': current_customers - prev_customers,
-                'changePercent': round(customer_change, 1),
+                'changePercent': customer_change,
             },
             'avgOrderValue': {
                 'value': round(avg_order_value, 2),
-                'changePercent': round(aov_change, 1),
+                'changePercent': aov_change,
             },
             'pipelineValue': {
                 'value': float(pipeline_value),
-                'changePercent': round(pipeline_change, 1),
+                'changePercent': pipeline_change,
             },
         },
         'dateRange': {

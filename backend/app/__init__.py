@@ -77,18 +77,50 @@ def create_app(config_name: str = None) -> Flask:
     # Health check endpoint
     @app.route('/api/health')
     def health():
-        return {'status': 'healthy', 'environment': config_name}
+        """Liveness plus data readiness.
 
-    # One-time seed endpoint (remove after seeding)
-    @app.route('/api/seed-database')
-    def seed_db_endpoint():
+        Reporting row counts and data freshness here is deliberate. Every
+        endpoint degrades gracefully on an empty database and returns 200 with
+        empty results, which is correct behaviour but indistinguishable from a
+        broken deployment when you are looking at a blank dashboard. This says
+        which one it is in a single request.
+        """
+        payload = {'status': 'healthy', 'environment': config_name}
+
         try:
-            from data.seed_data import seed_database as run_seed
-            run_seed()
-            return {'status': 'success', 'message': 'Database seeded successfully'}
-        except Exception as e:
-            import traceback
-            return {'status': 'error', 'message': str(e), 'trace': traceback.format_exc()}, 500
+            from datetime import date
+            from .models import Customer, Pipeline, Transaction
+
+            counts = {
+                'customers': db.session.query(Customer).count(),
+                'transactions': db.session.query(Transaction).count(),
+                'pipeline': db.session.query(Pipeline).count(),
+            }
+            latest = db.session.query(db.func.max(Transaction.transaction_date)).scalar()
+            seeded = counts['transactions'] > 0
+
+            payload['data'] = {
+                'seeded': seeded,
+                'counts': counts,
+                'latestTransaction': latest.isoformat() if latest else None,
+                'ageInDays': (date.today() - latest).days if latest else None,
+            }
+            if not seeded:
+                payload['status'] = 'degraded'
+                payload['hint'] = 'Database is empty. Run: python reseed.py'
+        except Exception as exc:  # noqa: BLE001 - surfaced, never swallowed
+            payload['status'] = 'degraded'
+            payload['data'] = {'error': str(exc)}
+            payload['hint'] = 'Tables may be missing. Run: python reseed.py'
+
+        return payload
+
+    # Seeding is a deliberate, local operation. It used to be exposed as an
+    # unauthenticated GET at /api/seed-database, which meant anyone who found
+    # the URL could wipe and regenerate the entire dataset, and a stack trace
+    # came back on failure. Use `python reseed.py` instead.
+    #
+    # If you ever need it over HTTP, gate it behind a token and make it POST.
 
     # Serve frontend static files in production
     if has_static:
@@ -103,21 +135,24 @@ def create_app(config_name: str = None) -> Flask:
                 return send_from_directory(static_folder, path)
             return send_from_directory(static_folder, 'index.html')
 
-    # Create tables and auto-reseed if data is stale
+    # Ensure tables exist. Creating them is safe and idempotent; populating them
+    # is not, and does not belong in an application factory.
+    #
+    # This block used to also auto-reseed whenever the newest transaction was
+    # more than a week old, by calling seed_database(). That produced infinite
+    # recursion: seed_database() itself calls create_app(), which reached this
+    # block, found the database still empty, and called seed_database() again.
+    # Each level opened its own SQLAlchemy engine, so the recursion terminated
+    # only by exhausting the server's connections — meaning the app could never
+    # cold-start against an empty database, and a shared Postgres instance would
+    # be knocked over in the attempt. The bare `except Exception: pass` around
+    # it hid the failure completely.
+    #
+    # Seeding is now a deliberate operation: `python reseed.py`.
     with app.app_context():
         try:
             db.create_all()
-        except Exception:
-            pass  # Tables already exist
-
-        try:
-            from .models.transaction import Transaction
-            from datetime import datetime, date, timedelta
-            latest = db.session.query(db.func.max(Transaction.transaction_date)).scalar()
-            if latest is None or latest < date.today() - timedelta(days=7):
-                from data.seed_data import seed_database as run_seed
-                run_seed()
-        except Exception:
+        except Exception:  # noqa: BLE001 - tables already exist is the normal case
             pass
 
     return app

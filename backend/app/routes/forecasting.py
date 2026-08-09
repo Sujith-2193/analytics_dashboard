@@ -1,69 +1,69 @@
 from flask import Blueprint, request
-from sqlalchemy import func, extract
-from datetime import datetime, timedelta
-import numpy as np
-import random
+from datetime import datetime
+import pandas as pd
 from app import db
 from app.models import Transaction, Customer, Pipeline
+from app import ml
+from app.ml.features import customer_frame
 
 bp = Blueprint('forecasting', __name__, url_prefix='/api/forecasting')
 
 
 def get_at_risk_customers_with_scores(start_date=None, end_date=None, limit=None):
-    """
-    Shared function to get at-risk customers with consistent risk scores.
-    Used by churn-risk, revenue-at-risk, and kpis endpoints for data consistency.
-    """
-    # Seed random based on date for consistent results across all endpoints
-    if start_date or end_date:
-        random.seed(hash(f"{start_date}{end_date}") % 1000)
-    else:
-        random.seed(42)
+    """Score currently-retained customers with the trained churn classifier.
 
-    # Get all at-risk customers from DB
-    query = db.session.query(Customer).filter(
-        Customer.status == 'at-risk'
-    ).order_by(
-        Customer.lifetime_value.desc()
-    )
+    `riskScore` is a calibrated predicted probability from the model, and
+    `daysSinceActivity` is the real recency computed from transaction history.
+    Both were previously derived from a customer's rank by lifetime value plus
+    `random.uniform()` noise, which meant the dashboard's headline risk numbers
+    were not connected to anything.
 
+    Churned accounts are excluded. The question this answers is which live
+    customers are about to leave, not which already have.
+
+    Returns an empty list when no model is available. Callers report that
+    honestly rather than substituting a heuristic.
+    """
+    model = ml.get_churn_model()
+    if model is None:
+        return []
+
+    frame = customer_frame()
+    frame = frame[frame['status'] != 'churned'].copy()
+    if frame.empty:
+        return []
+
+    frame['risk_score'] = model.predict_proba(frame)
+
+    lookup = {
+        c.id: c
+        for c in db.session.query(Customer).filter(
+            Customer.id.in_(frame['customer_id'].tolist())
+        ).all()
+    }
+
+    frame = frame.sort_values('risk_score', ascending=False)
     if limit:
-        query = query.limit(limit)
+        frame = frame.head(limit)
 
-    results = query.all()
-
-    # Calculate risk scores consistently - spread across high/medium/low categories
-    customers_with_scores = []
-    total_customers = len(results)
-    for i, customer in enumerate(results):
-        # Distribute risk scores: ~40% high (0.65+), ~35% medium (0.50-0.65), ~25% low (<0.50)
-        # Higher LTV customers (earlier in list) get lower risk scores
-        position_ratio = i / max(total_customers - 1, 1)  # 0 to 1
-        if position_ratio < 0.25:
-            # Top 25% LTV: low risk (0.35-0.50)
-            base_risk = 0.35 + (position_ratio * 0.6)  # 0.35 to 0.50
-        elif position_ratio < 0.60:
-            # Next 35% LTV: medium risk (0.50-0.65)
-            base_risk = 0.50 + ((position_ratio - 0.25) / 0.35) * 0.15  # 0.50 to 0.65
-        else:
-            # Bottom 40% LTV: high risk (0.65-0.90)
-            base_risk = 0.65 + ((position_ratio - 0.60) / 0.40) * 0.25  # 0.65 to 0.90
-
-        risk_score = min(0.95, max(0.30, base_risk + random.uniform(-0.05, 0.05)))
-        days_since = 20 + random.randint(0, 40)
-
-        customers_with_scores.append({
+    scored = []
+    for row in frame.itertuples():
+        customer = lookup.get(row.customer_id)
+        if customer is None:
+            continue
+        risk = float(row.risk_score)
+        scored.append({
             'id': customer.id,
             'name': customer.name,
             'company': customer.company,
             'segment': customer.segment,
             'lifetimeValue': float(customer.lifetime_value) if customer.lifetime_value else 0,
-            'riskScore': round(risk_score, 2),
-            'daysSinceActivity': days_since,
-            'recommendation': 'Executive outreach' if risk_score > 0.75 else 'Success check-in',
+            'riskScore': round(risk, 2),
+            'daysSinceActivity': int(row.recency_days),
+            'recommendation': 'Executive outreach' if risk > 0.75 else 'Success check-in',
         })
 
-    return customers_with_scores
+    return scored
 
 
 def categorize_customers_by_risk(customers_with_scores):
@@ -93,30 +93,69 @@ def categorize_customers_by_risk(customers_with_scores):
 
 
 def get_model_metrics(start_date=None, end_date=None):
-    """
-    Shared function to get model performance metrics.
-    Used by both kpis and model-performance endpoints for consistency.
-    """
-    if start_date or end_date:
-        random.seed(hash(f"{start_date}{end_date}") % 10000 + 400)
-    else:
-        random.seed(42)
+    """Real holdout metrics for both models.
 
-    accuracy = 92.0 + random.uniform(0, 4.0)
-    mape = 4.5 + random.uniform(0, 3.0)
-    r2_score = 0.92 + random.uniform(0, 0.06)
-    rmse = 28000 + random.randint(0, 10000)
-    confidence = 93 + random.randint(0, 5)
+    Every figure here is measured by scikit-learn on data the model never
+    trained on. The date-range arguments are accepted for API compatibility and
+    deliberately ignored: model performance is a property of the fit, not of
+    whatever window the user is currently looking at. Varying it by filter would
+    be theatre.
 
-    return {
-        'accuracy': round(accuracy, 1),
-        'mape': round(mape, 1),
-        'r2Score': round(r2_score, 3),
-        'rmse': rmse,
-        'dataPoints': '24 mo',
-        'lastUpdate': 'Dec 20',
-        'confidence': confidence,
-    }
+    Returns `available: False` when a model could not be trained, because the
+    honest answer to "how good is the model" is sometimes "there isn't one."
+    """
+    forecast = ml.get_revenue_forecast()
+    churn_model = ml.get_churn_model()
+
+    if forecast is None and churn_model is None:
+        return {
+            'available': False,
+            'reason': ml.get_revenue_error() or ml.get_churn_error() or 'models unavailable',
+        }
+
+    payload = {'available': True}
+
+    if forecast is not None:
+        m = forecast.metrics
+        payload['revenue'] = {
+            'mape': m.mape,
+            'rmse': m.rmse,
+            'mae': m.mae,
+            'r2Score': m.r2,
+            'naiveMape': m.naive_mape,
+            'seasonalNaiveMape': m.seasonal_naive_mape,
+            'improvementOverNaive': m.improvement_over_naive,
+            'trainMonths': m.n_train,
+            'holdoutMonths': m.n_test,
+            'model': 'Ridge regression on trend, seasonality, and 2 lags',
+            'validation': 'chronological holdout',
+        }
+        # Back-compat keys the existing UI reads. Sourced from the real fit.
+        payload['mape'] = m.mape
+        payload['rmse'] = m.rmse
+        payload['r2Score'] = m.r2
+        payload['dataPoints'] = f'{m.n_train + m.n_test} mo'
+
+    if churn_model is not None:
+        c = churn_model.metrics
+        payload['churn'] = {
+            'rocAuc': c.roc_auc,
+            'averagePrecision': c.average_precision,
+            'accuracy': c.accuracy,
+            'precision': c.precision,
+            'recall': c.recall,
+            'f1': c.f1,
+            'brierScore': c.brier,
+            'baseRate': c.positive_rate,
+            'trainRows': c.n_train,
+            'holdoutRows': c.n_test,
+            'topFeatures': c.feature_importance,
+            'model': 'Gradient-boosted classifier on RFM and account features',
+            'validation': 'stratified holdout',
+        }
+        payload['accuracy'] = round(c.accuracy * 100, 1)
+
+    return payload
 
 
 def get_next_month_first(dt):
@@ -136,101 +175,79 @@ def add_months(dt, months):
 
 @bp.route('/revenue')
 def get_revenue_forecast():
-    """Get revenue forecast using simple time series."""
+    """Monthly revenue forecast from the trained model.
+
+    Predictions come from `app.ml.revenue`, a ridge regression on trend,
+    cyclical seasonality, and two autoregressive lags, fit on complete months
+    only. Confidence bounds are derived from the model's own holdout RMSE and
+    widen with the square root of the horizon, which is the standard way an
+    interval grows as you forecast further out.
+
+    Previously the slope was multiplied by `random.uniform(0.9, 1.1)`, each
+    predicted point by `random.uniform(0.95, 1.05)`, and the interval width was
+    `random.uniform(0.08, 0.12)` of the value. None of that described
+    uncertainty; it was decoration.
+    """
     periods = request.args.get('periods', 6, type=int)
+    periods = max(1, min(periods, 24))
     start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
 
-    # Seed for consistent variation per date range
-    if start_date or end_date:
-        random.seed(hash(f"{start_date}{end_date}") % 10000)
-
-    # Get historical monthly revenue
-    historical = db.session.query(
-        func.date_trunc('month', Transaction.transaction_date).label('date'),
-        func.sum(Transaction.amount).label('revenue')
-    ).filter(
-        Transaction.status == 'completed'
-    ).group_by(
-        func.date_trunc('month', Transaction.transaction_date)
-    ).order_by(
-        func.date_trunc('month', Transaction.transaction_date)
-    ).all()
-
-    # Convert to arrays for forecasting
-    revenues = [float(h.revenue) for h in historical if h.revenue]
-
-    if len(revenues) < 3:
-        # Not enough data, return empty forecast
+    forecast = ml.get_revenue_forecast(horizon=periods)
+    if forecast is None:
         return []
 
-    # Simple linear regression forecast
-    x = np.arange(len(revenues))
-    y = np.array(revenues)
+    history = forecast.history
+    rmse = forecast.metrics.rmse
 
-    # Calculate trend with variation based on date
-    base_slope = np.polyfit(x, y, 1)[0]
-    slope = base_slope * random.uniform(0.9, 1.1)
-    last_value = revenues[-1]
+    # Clip the *displayed* history to the selected window.
+    #
+    # The model still trains on every month available, which is correct and
+    # must not change: throwing away history to match a UI filter would make
+    # the forecast worse. Only the plotted actuals are scoped.
+    #
+    # Without this the card always showed a fixed eight-month tail regardless of
+    # the filter, so selecting Year to Date put December of the previous year on
+    # a chart the user had just scoped to January onward.
+    if start_date:
+        try:
+            cutoff = pd.Period(start_date, freq='M')
+            clipped = history[history['period'] >= cutoff]
+            # Keep at least two points so the line has something to draw.
+            history = clipped if len(clipped) >= 2 else history.tail(2)
+        except Exception:  # noqa: BLE001 - a malformed filter must not 500
+            pass
 
-    # Determine the cutoff: next upcoming first of month is where prediction starts
-    today = datetime.now()
-    prediction_start = get_next_month_first(today)
-
-    # Generate result with all dates as first of month
     result = []
 
-    # Add historical months (last 6 months before prediction starts)
-    # Filter to only include months before the prediction start
-    # Convert to date for comparison to avoid timezone issues
-    prediction_start_date = prediction_start.date()
-    historical_before_prediction = []
-    for h in historical:
-        h_dt = h.date
-        # Handle both datetime and date objects, with or without timezone
-        if hasattr(h_dt, 'date'):
-            h_date = h_dt.date()
-        else:
-            h_date = h_dt
-        if h_date < prediction_start_date:
-            historical_before_prediction.append(h)
-
-    # Take the last 5 months of actual data (so prediction point is centered)
-    last_actual_value = None
-    for h in historical_before_prediction[-5:]:
-        h_date = h.date.date() if hasattr(h.date, 'date') else h.date
-        month_date = datetime(h_date.year, h_date.month, 1)
-        actual_value = float(h.revenue) if h.revenue else 0
-        last_actual_value = actual_value
-
+    # Actuals: solid line.
+    tail = history.tail(12)
+    rows = list(tail.itertuples())
+    for row in rows:
         result.append({
-            'date': month_date.strftime('%Y-%m-%d'),
-            'actual': actual_value,
-            'predicted': None,  # No predicted on actual months
+            'date': row.period.start_time.strftime('%Y-%m-%d'),
+            'actual': round(float(row.revenue), 2),
+            'predicted': None,
             'lowerBound': None,
             'upperBound': None,
         })
 
-    # Add forecast periods starting from prediction_start (all on 1st of month)
-    for i in range(periods):
-        forecast_date = add_months(prediction_start, i)
+    # The join. The last actual month carries the predicted value too, set to
+    # the actual, so the dashed line begins exactly where the solid one ends
+    # instead of starting somewhere above or below it.
+    if rows:
+        result[-1]['predicted'] = round(float(rows[-1].revenue), 2)
 
-        if i == 0:
-            # First prediction point bridges from last actual value
-            predicted = last_actual_value if last_actual_value else last_value
-        else:
-            base_predicted = last_value + (slope * i)
-            predicted = base_predicted * random.uniform(0.95, 1.05)
-
-        # Add some variance for confidence interval
-        variance = predicted * random.uniform(0.08, 0.12)
-
+    # Forecast: dashed continuation. The band widens with the square root of the
+    # horizon, which is how forecast uncertainty compounds.
+    for step, row in enumerate(forecast.predictions.itertuples(), start=1):
+        predicted = float(row.revenue)
+        spread = rmse * (step ** 0.5)
         result.append({
-            'date': forecast_date.strftime('%Y-%m-%d'),
-            'actual': last_actual_value if i == 0 else None,  # Bridge: first prediction has actual too
+            'date': row.period.start_time.strftime('%Y-%m-%d'),
+            'actual': None,
             'predicted': round(predicted, 2),
-            'lowerBound': round(predicted - variance, 2) if i > 0 else None,
-            'upperBound': round(predicted + variance, 2) if i > 0 else None,
+            'lowerBound': round(max(predicted - spread, 0.0), 2),
+            'upperBound': round(predicted + spread, 2),
         })
 
     return result
@@ -238,40 +255,55 @@ def get_revenue_forecast():
 
 @bp.route('/pipeline')
 def get_pipeline_forecast():
-    """Get weighted pipeline forecast."""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    """Weighted pipeline forecast by expected close month.
 
-    # Seed for consistent variation per date range
-    if start_date or end_date:
-        random.seed(hash(f"{start_date}{end_date}") % 10000 + 100)
+    The three numbers are the standard sales-forecast trio and each has a
+    definition rather than a multiplier:
 
-    # Get pipeline by expected close month
-    results = db.session.query(
-        func.date_trunc('month', Pipeline.expected_close_date).label('month'),
-        func.sum(Pipeline.amount).label('total'),
-        func.sum(Pipeline.amount * Pipeline.probability / 100).label('weighted')
+    - `best`     every open opportunity closes at full value
+    - `weighted` sum of amount x probability, the expected value
+    - `worst`    commit only, meaning opportunities already at negotiation or
+                 later, still probability-weighted
+
+    Previously every figure was scaled by `random.uniform(0.9, 1.1)` and the
+    worst case was the weighted number times `random.uniform(0.45, 0.55)`, so
+    the "conservative" line was a coin flip rather than a commit.
+    """
+    # Grouped in Python rather than with date_trunc so the endpoint works on
+    # SQLite as well as Postgres, which is what lets it be tested.
+    rows = db.session.query(
+        Pipeline.expected_close_date,
+        Pipeline.amount,
+        Pipeline.probability,
+        Pipeline.stage,
     ).filter(
         Pipeline.stage.notin_(['closed-won', 'closed-lost']),
-        Pipeline.expected_close_date >= datetime.now().date()
-    ).group_by(
-        func.date_trunc('month', Pipeline.expected_close_date)
-    ).order_by(
-        func.date_trunc('month', Pipeline.expected_close_date)
-    ).limit(6).all()
+        Pipeline.expected_close_date >= datetime.now().date(),
+    ).all()
+
+    COMMIT_STAGES = {'negotiation'}
+
+    buckets = {}
+    for row in rows:
+        if row.expected_close_date is None or row.amount is None:
+            continue
+        key = (row.expected_close_date.year, row.expected_close_date.month)
+        bucket = buckets.setdefault(key, {'best': 0.0, 'weighted': 0.0, 'worst': 0.0})
+        amount = float(row.amount)
+        probability = (row.probability or 0) / 100.0
+        bucket['best'] += amount
+        bucket['weighted'] += amount * probability
+        if row.stage in COMMIT_STAGES:
+            bucket['worst'] += amount * probability
 
     forecast_data = []
-    for row in results:
-        # Apply variation based on date
-        variation = random.uniform(0.9, 1.1)
-        weighted = float(row.weighted) * variation if row.weighted else 0
-        total = float(row.total) * variation if row.total else 0
-
+    for (year, month) in sorted(buckets)[:6]:
+        bucket = buckets[(year, month)]
         forecast_data.append({
-            'month': row.month.strftime('%b %Y') if row.month else 'Unknown',
-            'weighted': round(weighted, 2),
-            'best': round(total, 2),
-            'worst': round(weighted * random.uniform(0.45, 0.55), 2),
+            'month': datetime(year, month, 1).strftime('%b %Y'),
+            'weighted': round(bucket['weighted'], 2),
+            'best': round(bucket['best'], 2),
+            'worst': round(bucket['worst'], 2),
         })
 
     return forecast_data
@@ -290,87 +322,121 @@ def get_churn_risk():
 
 @bp.route('/kpis')
 def get_forecasting_kpis():
-    """Get forecasting KPIs with change percentages."""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    """Headline forecasting KPIs.
 
-    # Get at-risk customers using shared function for consistency
-    at_risk_customers = get_at_risk_customers_with_scores(start_date, end_date)
+    `predictedRevenue` is next month from the trained forecaster and
+    `predictedChange` is its real percentage change against the last complete
+    month. Both used to be a hardcoded 4,500,000 multiplied by
+    `random.uniform(0.85, 1.15)` and a random 8-18% respectively.
+
+    `atRiskChange` and `accuracyChange` are **null on purpose**. A delta needs a
+    prior observation to compare against, and this application stores no
+    historical snapshots of either the at-risk count or model performance.
+    They were previously `random.choice([-1, 1]) * random.uniform(...)`, which
+    invented both the direction and the magnitude. Returning null lets the UI
+    omit the arrow rather than draw a fictional one.
+    """
+    at_risk_customers = get_at_risk_customers_with_scores()
     at_risk_count = len(at_risk_customers)
 
-    # Get model metrics using shared function for consistency
-    model_metrics = get_model_metrics(start_date, end_date)
+    model_metrics = get_model_metrics()
 
-    # Seed for other KPI variations
-    if start_date or end_date:
-        random.seed(hash(f"{start_date}{end_date}") % 10000 + 300)
-    else:
-        random.seed(42)
-
-    # Calculate predicted revenue (varies by date)
-    base_predicted = 4500000
-    predicted_revenue = base_predicted * random.uniform(0.85, 1.15)
-    predicted_change = random.uniform(8.0, 18.0)
-
-    # At-risk change calculation
-    at_risk_change = random.choice([-1, 1]) * random.uniform(3.0, 12.0)
-
-    # Model accuracy change
-    accuracy_change = random.choice([-1, 1]) * random.uniform(0.5, 2.0)
+    predicted_revenue = None
+    predicted_change = None
+    forecast = ml.get_revenue_forecast()
+    if forecast is not None and not forecast.predictions.empty:
+        predicted_revenue = round(float(forecast.predictions['revenue'].iloc[0]), 2)
+        last_actual = float(forecast.history['revenue'].iloc[-1])
+        if last_actual:
+            predicted_change = round((predicted_revenue - last_actual) / last_actual * 100, 1)
 
     return {
-        'predictedRevenue': round(predicted_revenue, 2),
-        'predictedChange': round(predicted_change, 1),
+        'predictedRevenue': predicted_revenue,
+        'predictedChange': predicted_change,
         'atRiskCount': at_risk_count,
-        'atRiskChange': round(at_risk_change, 1),
-        'modelAccuracy': model_metrics['accuracy'],
-        'accuracyChange': round(accuracy_change, 1),
+        # No historical snapshot exists to difference against. See docstring.
+        'atRiskChange': None,
+        'modelAccuracy': model_metrics.get('accuracy'),
+        'accuracyChange': None,
         'forecastPeriod': 6,
     }
 
 
 @bp.route('/seasonality')
 def get_seasonality():
-    """Get seasonal revenue patterns."""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    """Seasonal revenue index by calendar month, with a real year-over-year trend.
 
-    # Seed for consistent variation per date range
-    if start_date or end_date:
-        random.seed(hash(f"{start_date}{end_date}") % 10000 + 200)
+    Two things were wrong here. The index was a genuine ratio multiplied by
+    `random.uniform(0.97, 1.03)`, and `trend` was `random.uniform(-0.02, 0.03)`
+    with no input at all.
 
-    # Get monthly averages by month of year
-    results = db.session.query(
-        extract('month', Transaction.transaction_date).label('month'),
-        func.avg(Transaction.amount).label('avg_revenue')
-    ).filter(
-        Transaction.status == 'completed'
-    ).group_by(
-        extract('month', Transaction.transaction_date)
-    ).order_by(
-        extract('month', Transaction.transaction_date)
-    ).all()
+    The index is now total completed revenue for each calendar month divided by
+    the average month, which is what a seasonality index means. Averaging
+    transaction *size* was the previous basis and it barely moves, because
+    seasonality shows up in how many deals close rather than how big they are.
 
-    if not results:
+    `trend` compares the most recent year's share for that month against the
+    prior year's. It is null for months without two years of history, since
+    there is nothing to compare.
+    """
+    rows = db.session.query(
+        Transaction.transaction_date,
+        Transaction.amount,
+    ).filter(Transaction.status == 'completed').all()
+
+    if not rows:
         return []
-
-    # Calculate overall average
-    overall_avg = sum(float(r.avg_revenue) for r in results if r.avg_revenue) / len(results)
 
     month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+    # revenue[month] across all years, and per (year, month) for the trend.
+    by_month = {m: 0.0 for m in range(1, 13)}
+    by_year_month = {}
+    for row in rows:
+        if row.transaction_date is None or row.amount is None:
+            continue
+        month = row.transaction_date.month
+        year = row.transaction_date.year
+        amount = float(row.amount)
+        by_month[month] += amount
+        by_year_month[(year, month)] = by_year_month.get((year, month), 0.0) + amount
+
+    observed = {m: v for m, v in by_month.items() if v > 0}
+    if not observed:
+        return []
+    overall_avg = sum(observed.values()) / len(observed)
+
+    # Year totals let the trend compare shares rather than raw amounts, so a
+    # growing business does not read as every month trending up.
+    year_totals = {}
+    for (year, month), value in by_year_month.items():
+        year_totals[year] = year_totals.get(year, 0.0) + value
+    years = sorted(year_totals)
+
     seasonality_data = []
-    for row in results:
-        base_index = float(row.avg_revenue) / overall_avg if overall_avg and row.avg_revenue else 1.0
-        # Add slight variation
-        index = base_index * random.uniform(0.97, 1.03)
-        trend = random.uniform(-0.02, 0.03)
+    for month in sorted(observed):
+        index = observed[month] / overall_avg if overall_avg else 1.0
+
+        trend = None
+        if len(years) >= 2:
+            recent, prior = years[-1], years[-2]
+            recent_total, prior_total = year_totals.get(recent), year_totals.get(prior)
+            recent_share = (
+                by_year_month.get((recent, month), 0.0) / recent_total
+                if recent_total else None
+            )
+            prior_share = (
+                by_year_month.get((prior, month), 0.0) / prior_total
+                if prior_total else None
+            )
+            if recent_share is not None and prior_share:
+                trend = round(recent_share - prior_share, 4)
 
         seasonality_data.append({
-            'month': month_names[int(row.month) - 1],
+            'month': month_names[month - 1],
             'index': round(index, 2),
-            'trend': round(trend, 2),
+            'trend': trend,
         })
 
     return seasonality_data

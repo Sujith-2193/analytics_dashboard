@@ -19,6 +19,7 @@ from flask import Blueprint, request
 from sqlalchemy import func, extract
 from datetime import datetime, timedelta
 from app import db
+from app.periods import drop_incomplete_tail
 from app.models import Transaction, Product
 
 bp = Blueprint('revenue', __name__, url_prefix='/api/revenue')
@@ -66,7 +67,7 @@ def get_trends():
         Transaction.status == 'completed'
     ).group_by(date_group).order_by(date_group).all()
 
-    return [
+    rows = [
         {
             'date': row.date.strftime('%Y-%m-%d') if hasattr(row.date, 'strftime') else str(row.date),
             'revenue': float(row.revenue) if row.revenue else 0,
@@ -74,6 +75,8 @@ def get_trends():
         }
         for row in results
     ]
+
+    return drop_incomplete_tail(rows, granularity, end)
 
 
 @bp.route('/by-category')
@@ -140,7 +143,11 @@ def get_by_region():
             'region': row.region or 'Other',
             'revenue': float(row.revenue) if row.revenue else 0,
             'customers': row.customers,
-            'growth': 0,  # Would need historical data
+            # Period-over-period growth per region needs a prior-window
+            # comparison this query does not run. It reported a constant 0 for
+            # every region, which reads as "flat" rather than "not computed".
+            # Null until it is measured; nothing in the UI consumes it today.
+            'growth': None,
         }
         for row in results
     ]
@@ -217,7 +224,11 @@ def get_top_products():
             'category': row.category,
             'revenue': float(row.revenue) if row.revenue else 0,
             'unitsSold': row.units or 0,
-            'growth': 0,  # Would need historical data
+            # Period-over-period growth per region needs a prior-window
+            # comparison this query does not run. It reported a constant 0 for
+            # every region, which reads as "flat" rather than "not computed".
+            # Null until it is measured; nothing in the UI consumes it today.
+            'growth': None,
             'avgPrice': float(row.revenue) / row.units if row.units else 0,
         }
         for row in results
