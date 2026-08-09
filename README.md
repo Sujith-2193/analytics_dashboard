@@ -2,11 +2,124 @@
 
 A full-stack business intelligence dashboard featuring real-time KPI tracking, interactive data visualizations, and ML-powered revenue forecasting. Built with React 19, Flask, and PostgreSQL.
 
+### **[Open the live demo →](https://analytics.ryansansbury.com)**
+
+Five pages of it, no signup. Everything you see was produced by the code in this
+repository: the queries ran against PostgreSQL, and the churn and forecasting
+figures come from scikit-learn models scored on a holdout rather than from
+plausible-looking constants.
+
+[![CI](https://github.com/ryansansbury/analytics_dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/ryansansbury/analytics_dashboard/actions/workflows/ci.yml)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-4169E1?logo=postgresql&logoColor=white)
 ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+![Executive dashboard](docs/screenshots/dashboard.png)
+
+<details>
+<summary><b>More screens</b> — forecasting, customers, revenue</summary>
+
+**Forecasting.** Six-month prediction continuing the actual series, with a
+confidence band from holdout RMSE, and model metrics reported next to the naive
+baseline they have to beat.
+
+![Forecasting](docs/screenshots/forecasting.png)
+
+**Customer intelligence.** Segmentation, cohort retention, and lifetime value.
+
+![Customers](docs/screenshots/customers.png)
+
+**Revenue analytics.** Breakdowns by category, region, and channel.
+
+![Revenue](docs/screenshots/revenue.png)
+
+</details>
+
+## What the models actually do
+
+Two of them, both measured rather than asserted:
+
+| Model | Task | Validation | Result |
+|---|---|---|---|
+| `GradientBoostingClassifier` | Churn risk per customer | Stratified holdout | **0.959 ROC AUC** |
+| `Ridge` on engineered time features | Monthly revenue forecast | Chronological holdout | **3.58% MAPE**, against a 5.82% naive baseline |
+
+Churn features are RFM plus tenure and engagement, and the label's cause is
+stripped from the training frame so no model can read it back. The forecast
+reports intervals derived from holdout RMSE scaled by the square root of the
+horizon, not a flat percentage band. `/api/forecasting/model-performance`
+returns those exact numbers, and `backend/tests/test_forecasting_api.py`
+asserts the endpoint matches the trained model rather than deriving anything.
+
+## About the hosted demo
+
+**This application runs against a live PostgreSQL database.** That is the real
+mode, it is what `docker compose up` gives you, and every instruction below
+describes it.
+
+The **hosted demo is a static build of that same application.** No server, no
+database, no cold start. `backend/scripts/snapshot.py` boots the real Flask app
+against a real Postgres instance, trains the models, walks every endpoint the UI
+calls under every date preset, and writes the responses to
+`frontend/public/data/`. The React build then reads those files instead of the
+network. One flag switches it:
+
+```bash
+# Live: talks to Flask and Postgres
+npm run build
+
+# Static: reads the pre-generated snapshot
+python backend/scripts/snapshot.py    # regenerate the data
+npm run build:static                  # build against it
+```
+
+To regenerate and publish the hosted demo in one step:
+
+```bash
+./scripts/refresh-demo.sh              # reseed, snapshot, test, build, deploy
+./scripts/refresh-demo.sh --no-deploy  # everything except publishing
+```
+
+The coverage test runs before the deploy rather than after, so a snapshot that
+misses an endpoint stops the release instead of becoming a blank chart in
+production. The script pins its own database rather than reading an ambient
+`DATABASE_URL`, because inheriting one would point a reseed at whatever project
+exported it.
+
+Two things worth being clear about:
+
+- **Every number in the demo came out of the real pipeline.** The queries ran,
+  the models were fit on a chronological holdout, and the metrics are measured.
+  Nothing is hand-written, and the snapshot is a build artifact rather than a
+  fixture kept up to date by hand.
+- **The demo's clock is frozen** to the date the snapshot was taken, which the
+  sidebar states. Date presets resolve against that date rather than today's,
+  so "Last 90 days" means the same 90 days it meant at build time. Without this
+  the presets would slide forward each day and ask for a window the snapshot
+  does not contain.
+
+The static path adds one module, `frontend/src/services/staticData.ts`, and one
+branch in `fetchApi`. Every API function, hook, and component is identical
+across the two modes, and the live build tree-shakes the static path out
+entirely.
+
+## Testing
+
+```bash
+cd backend && pytest -q             # 116 tests
+cd frontend && npm test             # 184 tests
+```
+
+CI runs both suites plus lint, a type-checked build, and a gitleaks secrets
+scan on every push.
+
+The frontend suite includes a snapshot-coverage check that mounts every page
+under every date preset and serves `fetch` from `frontend/public/data/`, so a
+request the snapshot does not cover fails a test instead of producing a blank
+chart in the demo. It skips itself when no snapshot has been generated.
 
 ## Features
 
@@ -35,15 +148,29 @@ A full-stack business intelligence dashboard featuring real-time KPI tracking, i
 - **Deal Cycle Time** - Average days per pipeline stage
 - **Stage Conversion Rates** - Stage-to-stage conversion analysis
 
-### ML-Powered Forecasting
-- **Revenue Predictions** - 6-month forward projections with confidence intervals
-- **Churn Risk Scoring** - At-risk customers with actionable recommendations
-- **Seasonality Analysis** - Monthly seasonality index for planning
-- **Model Performance Metrics** - Accuracy tracking and forecast confidence
+### Machine Learning
+
+Two supervised models train on the application's own data at startup. Every
+performance figure the API reports is measured on a holdout the model never
+trained on, and the endpoint returns `available: false` rather than a number
+when a model cannot be fit.
+
+- **Revenue forecasting** — ridge regression on trend, cyclical seasonality,
+  and two autoregressive lags. Validated on a *chronological* holdout, never a
+  shuffled split. Reported alongside a last-value naive baseline, because that
+  comparison is the only thing that says whether the model earns its keep.
+  Confidence bounds come from holdout RMSE and widen with the square root of
+  the horizon.
+- **Churn classification** — gradient-boosted classifier over RFM features,
+  tenure, refund rate, spend trend, and account attributes. Validated on a
+  stratified holdout. Reports ROC AUC, average precision, precision, recall,
+  F1, and Brier score, plus gain-based feature importance.
+- **Seasonality analysis** — monthly index for planning.
+
+Run `pytest tests/` in `backend/` to reproduce every number.
 
 ### Global Features
 - **Date Range Filtering** - Preset ranges (Last 7 days, 30 days, 90 days, YTD, Last Year) or custom dates
-- **Data Export** - Export dashboard data as CSV, JSON, or PDF
 - **Light/Dark Mode** - Toggle between themes (defaults to light mode)
 - **Responsive Design** - Works on desktop and tablet screens
 
@@ -62,7 +189,7 @@ A full-stack business intelligence dashboard featuring real-time KPI tracking, i
 - **Flask 3.0** REST API
 - **SQLAlchemy** ORM with PostgreSQL
 - **NumPy & Pandas** for data processing
-- **scikit-learn** for ML forecasting models
+- **scikit-learn** for the forecasting and churn models
 - **Gunicorn** production server
 
 ### Infrastructure
