@@ -61,17 +61,31 @@ export function Forecasting() {
   // Quarterly actual against quarterly forecast, aggregated from the same
   // series the chart above plots. A month counts as actual when it has one and
   // as projected otherwise, so the join month is never counted twice.
+  //
+  // Quarters the series only partly covers are dropped. This is the same rule
+  // app/periods.py applies to months, and it was missing here: under a 90-day
+  // window the series opened mid-quarter and ended one month into the next, so
+  // the first bar showed two thirds of a quarter and the last showed one third,
+  // and the chart read as revenue collapsing at both ends.
+  //
+  // The two series stack rather than sit side by side. A quarter is almost
+  // always wholly historical or wholly forecast, so grouped bars left every
+  // quarter but the crossover with one empty slot, which reads as missing data.
   const growthProjections = (() => {
-    const buckets = new Map<string, { quarter: string; historical: number; projected: number }>();
+    const buckets = new Map<
+      string,
+      { quarter: string; historical: number; projected: number; months: number }
+    >();
     for (const row of revenueForecast || []) {
       const date = new Date(`${row.date}T00:00:00`);
       const key = `Q${Math.floor(date.getMonth() / 3) + 1} ${date.getFullYear()}`;
-      const bucket = buckets.get(key) ?? { quarter: key, historical: 0, projected: 0 };
+      const bucket = buckets.get(key) ?? { quarter: key, historical: 0, projected: 0, months: 0 };
+      bucket.months += 1;
       if (row.actual != null) bucket.historical += row.actual;
       else if (row.predicted != null) bucket.projected += row.predicted;
       buckets.set(key, bucket);
     }
-    return [...buckets.values()];
+    return [...buckets.values()].filter((b) => b.months === 3);
   })();
 
   // Real revenue by segment for the selected window. Previously four invented
@@ -196,6 +210,7 @@ export function Forecasting() {
               yKeys={['historical', 'projected']}
               labels={{ historical: 'Actual', projected: 'Forecast' }}
               formatY="currency"
+              stacked
               colors={['var(--color-chart-1)', 'var(--color-chart-2)']}
             />
           </ChartCard>

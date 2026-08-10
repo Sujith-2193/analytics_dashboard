@@ -76,7 +76,9 @@ export function AreaChart<T extends Record<string, unknown>>({
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <RechartsAreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+      {/* Right margin so the final x-axis tick is not clipped by the plot edge.
+        * With zero margin the last label rendered as "Ja" instead of "Jan 1". */}
+      <RechartsAreaChart data={data} margin={{ top: 0, right: 14, left: 0, bottom: 0 }}>
         <defs>
           {yKeys.map((key, index) => (
             <linearGradient
@@ -189,15 +191,22 @@ export function AreaChart<T extends Record<string, unknown>>({
              * backtest overlaps the actuals, two translucent fills stack into a
              * smear in which neither line can be read - which is exactly what
              * happened on the forecasting page.
+             *
+             * When a band is present nothing is filled. On a chart that runs
+             * measured history into a forecast, filling the measured half
+             * produced a solid block that fell off a cliff to the axis the
+             * moment the actuals stopped, which read as the data breaking
+             * rather than as history ending. The band is the fill; a second one
+             * competes with it.
              */
             fill={
-              dashedKeys.includes(key)
+              dashedKeys.includes(key) || band
                 ? 'none'
                 : gradient
                   ? `url(#gradient-${String(key)})`
                   : seriesColor(index)
             }
-            fillOpacity={dashedKeys.includes(key) ? 0 : gradient ? 1 : 0.1}
+            fillOpacity={dashedKeys.includes(key) || band ? 0 : gradient ? 1 : 0.1}
           />
         ))}
       </RechartsAreaChart>

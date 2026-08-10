@@ -1,6 +1,6 @@
 {
   "snapshotDate": "2026-08-09",
-  "generatedAt": "2026-08-09T16:52:23",
+  "generatedAt": "2026-08-09T18:43:49",
   "presets": {
     "last7d": {
       "startDate": "2026-08-02",
@@ -109,9 +109,9 @@
     "/api/forecasting/kpis?start_date=2026-05-11&end_date=2026-08-09": "api-forecasting-kpis-start-date-2026-05-11-end-date-2026-08-09.json",
     "/api/forecasting/model-performance?start_date=2026-05-11&end_date=2026-08-09": "api-forecasting-model-performance-start-date-2026-05-11-end-date-2026-08-09.json",
     "/api/forecasting/revenue-at-risk?start_date=2026-05-11&end_date=2026-08-09": "api-forecasting-revenue-at-risk-start-date-2026-05-11-end-date-2026-08-09.json",
-    "/api/revenue/trends?start_date=2026-05-11&end_date=2026-08-09&granularity=month": "api-revenue-trends-start-date-2026-05-11-end-date-2026-08-09-granularity-month.json",
     "/api/revenue/trends?start_date=2026-05-11&end_date=2026-08-09&granularity=week": "api-revenue-trends-start-date-2026-05-11-end-date-2026-08-09-granularity-week.json",
     "/api/revenue/trends?start_date=2026-05-11&end_date=2026-08-09&granularity=day": "api-revenue-trends-start-date-2026-05-11-end-date-2026-08-09-granularity-day.json",
+    "/api/revenue/trends?start_date=2026-05-11&end_date=2026-08-09&granularity=month": "api-revenue-trends-start-date-2026-05-11-end-date-2026-08-09-granularity-month.json",
     "/api/revenue/top-products?start_date=2026-05-11&end_date=2026-08-09&limit=8": "api-revenue-top-products-start-date-2026-05-11-end-date-2026-08-09-limit-8.json",
     "/api/revenue/top-products?start_date=2026-05-11&end_date=2026-08-09&limit=18": "api-revenue-top-products-start-date-2026-05-11-end-date-2026-08-09-limit-18.json",
     "/api/customers/at-risk?limit=10&start_date=2026-05-11&end_date=2026-08-09": "api-customers-at-risk-limit-10-start-date-2026-05-11-end-date-2026-08-09.json",
@@ -138,8 +138,8 @@
     "/api/forecasting/model-performance?start_date=2026-01-01&end_date=2026-08-09": "api-forecasting-model-performance-start-date-2026-01-01-end-date-2026-08-09.json",
     "/api/forecasting/revenue-at-risk?start_date=2026-01-01&end_date=2026-08-09": "api-forecasting-revenue-at-risk-start-date-2026-01-01-end-date-2026-08-09.json",
     "/api/revenue/trends?start_date=2026-01-01&end_date=2026-08-09&granularity=week": "api-revenue-trends-start-date-2026-01-01-end-date-2026-08-09-granularity-week.json",
-    "/api/revenue/trends?start_date=2026-01-01&end_date=2026-08-09&granularity=month": "api-revenue-trends-start-date-2026-01-01-end-date-2026-08-09-granularity-month.json",
     "/api/revenue/trends?start_date=2026-01-01&end_date=2026-08-09&granularity=day": "api-revenue-trends-start-date-2026-01-01-end-date-2026-08-09-granularity-day.json",
+    "/api/revenue/trends?start_date=2026-01-01&end_date=2026-08-09&granularity=month": "api-revenue-trends-start-date-2026-01-01-end-date-2026-08-09-granularity-month.json",
     "/api/revenue/top-products?start_date=2026-01-01&end_date=2026-08-09&limit=8": "api-revenue-top-products-start-date-2026-01-01-end-date-2026-08-09-limit-8.json",
     "/api/revenue/top-products?start_date=2026-01-01&end_date=2026-08-09&limit=18": "api-revenue-top-products-start-date-2026-01-01-end-date-2026-08-09-limit-18.json",
     "/api/customers/at-risk?limit=10&start_date=2026-01-01&end_date=2026-08-09": "api-customers-at-risk-limit-10-start-date-2026-01-01-end-date-2026-08-09.json",
@@ -166,8 +166,8 @@
     "/api/forecasting/model-performance?start_date=2025-08-09&end_date=2026-08-09": "api-forecasting-model-performance-start-date-2025-08-09-end-date-2026-08-09.json",
     "/api/forecasting/revenue-at-risk?start_date=2025-08-09&end_date=2026-08-09": "api-forecasting-revenue-at-risk-start-date-2025-08-09-end-date-2026-08-09.json",
     "/api/revenue/trends?start_date=2025-08-09&end_date=2026-08-09&granularity=week": "api-revenue-trends-start-date-2025-08-09-end-date-2026-08-09-granularity-week.json",
-    "/api/revenue/trends?start_date=2025-08-09&end_date=2026-08-09&granularity=month": "api-revenue-trends-start-date-2025-08-09-end-date-2026-08-09-granularity-month.json",
     "/api/revenue/trends?start_date=2025-08-09&end_date=2026-08-09&granularity=day": "api-revenue-trends-start-date-2025-08-09-end-date-2026-08-09-granularity-day.json",
+    "/api/revenue/trends?start_date=2025-08-09&end_date=2026-08-09&granularity=month": "api-revenue-trends-start-date-2025-08-09-end-date-2026-08-09-granularity-month.json",
     "/api/revenue/top-products?start_date=2025-08-09&end_date=2026-08-09&limit=8": "api-revenue-top-products-start-date-2025-08-09-end-date-2026-08-09-limit-8.json",
     "/api/revenue/top-products?start_date=2025-08-09&end_date=2026-08-09&limit=18": "api-revenue-top-products-start-date-2025-08-09-end-date-2026-08-09-limit-18.json",
     "/api/customers/at-risk?limit=10&start_date=2025-08-09&end_date=2026-08-09": "api-customers-at-risk-limit-10-start-date-2025-08-09-end-date-2026-08-09.json",

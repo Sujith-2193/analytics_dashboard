@@ -147,14 +147,27 @@ describe('model performance tiles', () => {
 });
 
 describe('quarterly revenue is derived, not authored', () => {
-  it('buckets the forecast series by quarter without double counting the join', async () => {
+  // FORECAST spans May, Jun, Jul actual and Aug, Sep predicted. That makes
+  // Q2 2026 a two-month quarter and Q3 2026 a complete one.
+  it('drops a quarter the series only partly covers', async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText('Quarterly Revenue')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Q3 2026')).toBeInTheDocument());
+    // Q2 holds only May and June here. Plotted, it reads as revenue a third
+    // lower than the quarter beside it, which is the partial-period defect
+    // app/periods.py exists to prevent, at quarterly granularity.
+    expect(screen.queryByText('Q2 2026')).toBeNull();
+  });
+
+  it('counts the join month once, as actual', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Q3 2026')).toBeInTheDocument());
     // 2026-07 carries both an actual and a predicted equal to it. Counting it
-    // once as actual is what keeps Q3 truthful.
-    const q3Actual = 24092891.28;
-    const q3Projected = 25335731.22 + 25892050.28;
-    expect(q3Actual + q3Projected).toBeCloseTo(75320672.78, 2);
+    // in both buckets would inflate Q3 by a full month.
+    const july = FORECAST.find((r) => r.date === '2026-07-01')!;
+    expect(july.actual).toBe(july.predicted);
+    const q3 = july.actual! + 25335731.22 + 25892050.28;
+    expect(q3).toBeCloseTo(75320672.78, 2);
   });
 
   it('no longer shows the invented quarterly figures', async () => {

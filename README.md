@@ -1,13 +1,10 @@
 # Analytics Dashboard
 
-A full-stack business intelligence dashboard featuring real-time KPI tracking, interactive data visualizations, and ML-powered revenue forecasting. Built with React 19, Flask, and PostgreSQL.
+A business intelligence platform with five pages of reporting over one warehouse. Revenue, customers, pipeline, and forecasting. Built with React 19, Flask, and PostgreSQL.
 
-### **[Open the live demo →](https://analytics.ryansansbury.com)**
+### **[Open the live demo](https://analytics.ryansansbury.com)**
 
-Five pages of it, no signup. Everything you see was produced by the code in this
-repository: the queries ran against PostgreSQL, and the churn and forecasting
-figures come from scikit-learn models scored on a holdout rather than from
-plausible-looking constants.
+No signup. Everything on screen came out of the code in this repository. The queries ran against PostgreSQL and the churn and forecasting numbers come from scikit-learn models scored on a holdout.
 
 [![CI](https://github.com/ryansansbury/analytics_dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/ryansansbury/analytics_dashboard/actions/workflows/ci.yml)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
@@ -17,366 +14,213 @@ plausible-looking constants.
 ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4-06B6D4?logo=tailwindcss&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-![Executive dashboard](docs/screenshots/dashboard.png)
+## The five pages
 
-<details>
-<summary><b>More screens</b> — forecasting, customers, revenue</summary>
+**Dashboard.** The executive view. KPIs against the prior period of equal length, a revenue trend that rebuckets with the filter, the pipeline funnel, and top products.
 
-**Forecasting.** Six-month prediction continuing the actual series, with a
-confidence band from holdout RMSE, and model metrics reported next to the naive
-baseline they have to beat.
+![Dashboard](docs/screenshots/dashboard.png)
 
-![Forecasting](docs/screenshots/forecasting.png)
-
-**Customer intelligence.** Segmentation, cohort retention, and lifetime value.
-
-![Customers](docs/screenshots/customers.png)
-
-**Revenue analytics.** Breakdowns by category, region, and channel.
+**Revenue.** Breakdowns by category, region, and channel over a filterable window.
 
 ![Revenue](docs/screenshots/revenue.png)
 
-</details>
+**Customers.** Segmentation, cohort retention by month offset, lifetime value distribution, and the accounts the churn model flags.
 
-## What the models actually do
+![Customers](docs/screenshots/customers.png)
 
-Two of them, both measured rather than asserted:
+**Operations.** The sales funnel end to end. Quota attainment per rep, cycle time per stage, and deal size distribution.
+
+![Operations](docs/screenshots/operations.png)
+
+**Forecasting.** Six months ahead with a confidence band from holdout error. Model metrics sit next to the baseline they have to beat.
+
+![Forecasting](docs/screenshots/forecasting.png)
+
+## The models
+
+Two of them. Both measured on data the model never trained on.
 
 | Model | Task | Validation | Result |
 |---|---|---|---|
 | `GradientBoostingClassifier` | Churn risk per customer | Stratified holdout | **0.959 ROC AUC** |
-| `Ridge` on engineered time features | Monthly revenue forecast | Chronological holdout | **3.58% MAPE**, against a 5.82% naive baseline |
+| `Ridge` on engineered time features | Monthly revenue forecast | Chronological holdout | **3.58% MAPE** against a 5.82% naive baseline |
 
-Churn features are RFM plus tenure and engagement, and the label's cause is
-stripped from the training frame so no model can read it back. The forecast
-reports intervals derived from holdout RMSE scaled by the square root of the
-horizon, not a flat percentage band. `/api/forecasting/model-performance`
-returns those exact numbers, and `backend/tests/test_forecasting_api.py`
-asserts the endpoint matches the trained model rather than deriving anything.
+The forecast is validated chronologically and never on a shuffled split. Shuffling lets a time-series model train on the future to predict the past. That produces excellent validation numbers and a useless model.
 
-## Two conventions this codebase holds to
+MAPE on its own says nothing about whether a model is worth running. Against a last-value baseline it does. This one beats the baseline by a real but unremarkable margin and the API reports both figures.
 
-**Numbers are measured, never generated.** This application used to report model
-accuracy, churn scores, and confidence intervals from `random.uniform()`. All of
-it is now derived from trained models on a holdout, and several tests assert that
-endpoint output matches the model exactly rather than approximately. Where a
-figure cannot be derived, the API returns `null` and the interface renders an
-honest blank instead of a plausible-looking constant.
+Churn features are RFM plus tenure and account attributes. The latent variable driving the label gets stripped before the frame reaches the model. Nothing can read the answer back out. `/api/forecasting/model-performance` returns the exact numbers above and `backend/tests/test_forecasting_api.py` asserts the endpoint matches the trained model rather than deriving anything.
 
-**Time buckets follow one rule, defined once.** A period the window only partly
-covers is not plotted, because a nine-day month sitting beside twelve complete
-ones reads as a collapse rather than as a month that is not over. That rule lives
-in `backend/app/periods.py` and every time-series endpoint calls it. It exists
-because the same data once trended upward under a 90-day filter and fell off a
-cliff under Year to Date, with bucket size the only difference.
+## Two rules this codebase holds to
 
-## About the hosted demo
+**Numbers are measured and never generated.** This application used to report model accuracy and churn scores from `random.uniform()`. All of it comes from trained models now. Where a figure cannot be derived the API returns `null` and the page renders a blank. A null change field means there is no prior period to compare against. It does not mean the change was zero.
 
-**This application runs against a live PostgreSQL database.** That is the real
-mode, it is what `docker compose up` gives you, and every instruction below
-describes it.
+**A partly covered time bucket is not plotted.** Nine days of a month sitting beside twelve finished ones reads as a collapse rather than as a month that is not over. The rule lives in `backend/app/periods.py` and every time-series endpoint calls it. It exists because the same data once trended up under a 90-day filter and fell off a cliff under Year to Date with bucket size the only difference.
 
-The **hosted demo is a static build of that same application.** No server, no
-database, no cold start. `backend/scripts/snapshot.py` boots the real Flask app
-against a real Postgres instance, trains the models, walks every endpoint the UI
-calls under every date preset, and writes the responses to
-`frontend/public/data/`. The React build then reads those files instead of the
-network. One flag switches it:
+## The hosted demo is a static build
+
+The application runs against live PostgreSQL. That is the real mode and every instruction below describes it.
+
+The demo is a build artifact of that same application. No server and no database. `backend/scripts/snapshot.py` boots the real Flask app, trains the models, walks every endpoint the interface calls under all five date presets, and freezes the responses to `frontend/public/data/`. The React build reads those files. One flag switches it.
 
 ```bash
-# Live: talks to Flask and Postgres
-npm run build
-
-# Static: reads the pre-generated snapshot
-python backend/scripts/snapshot.py    # regenerate the data
-npm run build:static                  # build against it
+npm run build          # live, talks to Flask and Postgres
+npm run build:static   # static, reads the snapshot
 ```
 
-To regenerate and publish the hosted demo in one step:
+Regenerate and publish in one step.
 
 ```bash
 ./scripts/refresh-demo.sh              # reseed, snapshot, test, build, deploy
 ./scripts/refresh-demo.sh --no-deploy  # everything except publishing
 ```
 
-The coverage test runs before the deploy rather than after, so a snapshot that
-misses an endpoint stops the release instead of becoming a blank chart in
-production. The script pins its own database rather than reading an ambient
-`DATABASE_URL`, because inheriting one would point a reseed at whatever project
-exported it.
+The coverage test runs before the deploy and not after. A snapshot missing an endpoint stops the release instead of reaching production as a blank chart. The script pins its own database rather than reading an ambient `DATABASE_URL`. Inheriting one points a reseed at whatever project exported it.
 
-Two things worth being clear about:
+Two things worth stating plainly.
 
-- **Every number in the demo came out of the real pipeline.** The queries ran,
-  the models were fit on a chronological holdout, and the metrics are measured.
-  Nothing is hand-written, and the snapshot is a build artifact rather than a
-  fixture kept up to date by hand.
-- **The demo's clock is frozen** to the date the snapshot was taken, which the
-  sidebar states. Date presets resolve against that date rather than today's,
-  so "Last 90 days" means the same 90 days it meant at build time. Without this
-  the presets would slide forward each day and ask for a window the snapshot
-  does not contain.
+Every number in the demo came out of the real pipeline. The queries ran and the models were fit. Nothing is hand-written and the snapshot is a build artifact rather than a fixture maintained by hand.
 
-The static path adds one module, `frontend/src/services/staticData.ts`, and one
-branch in `fetchApi`. Every API function, hook, and component is identical
-across the two modes, and the live build tree-shakes the static path out
-entirely.
+The demo's clock is frozen at the date the snapshot was taken and the sidebar says so. Presets resolve against that date instead of today. Without it they slide forward every morning and ask for a window the snapshot does not hold.
+
+The static path adds one module and one branch in `fetchApi`. Every API function, hook, and component is identical across both modes. The live build tree-shakes the static path out.
 
 ## Testing
 
 ```bash
-cd backend && pytest -q             # 116 tests
-cd frontend && npm test             # 184 tests
+cd backend  && pytest -q     # 117 tests
+cd frontend && npm test      # 185 tests
 ```
 
-CI runs both suites plus lint, a type-checked build, and a gitleaks secrets
-scan on every push.
+CI runs both suites plus lint, a type-checked build, and a gitleaks scan on every push. The backend job starts its own PostgreSQL service so the cross-endpoint consistency suite runs there instead of skipping.
 
-The frontend suite includes a snapshot-coverage check that mounts every page
-under every date preset and serves `fetch` from `frontend/public/data/`, so a
-request the snapshot does not cover fails a test instead of producing a blank
-chart in the demo. It skips itself when no snapshot has been generated.
+The frontend suite includes a coverage check that mounts every page under every preset and serves `fetch` from the snapshot directory. A request the snapshot does not cover fails a test rather than producing a blank chart. It skips itself when no snapshot has been generated.
 
-## Features
+Destructive fixtures refuse to run against a database whose name does not end in `_test`. Pointing them at a working database destroys the data in it while every test still passes.
 
-### Executive Dashboard
-- **KPI Cards** - Track key metrics including Total Revenue, Customers, Average Order Value, Conversion Rate, Pipeline Value, and Growth Rate
-- **Revenue Trends** - Interactive area charts with configurable granularity (daily, weekly, monthly)
-- **Category Distribution** - Donut charts showing revenue breakdown by product category
-- **Sales Pipeline** - Funnel visualization with pipeline percentage per stage
-- **Top Products** - Sortable table of best-performing products
+## Stack
 
-### Revenue Analytics
-- Detailed revenue breakdowns by category and region
-- Period-over-period comparisons with change percentages
-- Top products performance table
-- Interactive bar and area charts with date range filtering
+**Frontend.** React 19 and TypeScript on Vite. TailwindCSS 4, Recharts, TanStack Query, and React Router 7.
 
-### Customer Intelligence
-- **Segmentation** - Customer distribution across enterprise, mid-market, and SMB tiers
-- **Cohort Retention** - 12-month retention analysis with heatmap visualization
-- **At-Risk Customers** - Identify customers showing signs of potential churn
-- **Lifetime Value Distribution** - LTV analysis across customer base
+**Backend.** Flask 3 and SQLAlchemy over PostgreSQL 15. NumPy, Pandas, and scikit-learn. Gunicorn in production.
 
-### Operations
-- **Sales Pipeline** - Full funnel visualization from Lead to Closed Won
-- **Sales Team Performance** - Quota attainment tracking (top 5 exceeding, bottom 5 developing)
-- **Deal Cycle Time** - Average days per pipeline stage
-- **Stage Conversion Rates** - Stage-to-stage conversion analysis
+**Local.** Docker Compose.
 
-### Machine Learning
+## Getting started
 
-Two supervised models train on the application's own data at startup. Every
-performance figure the API reports is measured on a holdout the model never
-trained on, and the endpoint returns `available: false` rather than a number
-when a model cannot be fit.
+You need Python 3.11+, Node 22+, and PostgreSQL 15+. Postgres is required rather than optional. Most time-series queries use `date_trunc` and SQLite has no equivalent.
 
-- **Revenue forecasting** — ridge regression on trend, cyclical seasonality,
-  and two autoregressive lags. Validated on a *chronological* holdout, never a
-  shuffled split. Reported alongside a last-value naive baseline, because that
-  comparison is the only thing that says whether the model earns its keep.
-  Confidence bounds come from holdout RMSE and widen with the square root of
-  the horizon.
-- **Churn classification** — gradient-boosted classifier over RFM features,
-  tenure, refund rate, spend trend, and account attributes. Validated on a
-  stratified holdout. Reports ROC AUC, average precision, precision, recall,
-  F1, and Brier score, plus gain-based feature importance.
-- **Seasonality analysis** — monthly index for planning.
-
-Run `pytest tests/` in `backend/` to reproduce every number.
-
-### Global Features
-- **Date Range Filtering** - Preset ranges (Last 7 days, 30 days, 90 days, YTD, Last Year) or custom dates
-- **Light/Dark Mode** - Toggle between themes (defaults to light mode)
-- **Responsive Design** - Works on desktop and tablet screens
-
-## Tech Stack
-
-### Frontend
-- **React 19** with TypeScript
-- **Vite** for fast development and optimized builds
-- **TailwindCSS 4** for utility-first styling
-- **Recharts** for responsive data visualizations
-- **TanStack Query** for server state management
-- **React Router 7** for client-side routing
-- **Lucide React** for icons
-
-### Backend
-- **Flask 3.0** REST API
-- **SQLAlchemy** ORM with PostgreSQL
-- **NumPy & Pandas** for data processing
-- **scikit-learn** for the forecasting and churn models
-- **Gunicorn** production server
-
-### Infrastructure
-- **Docker Compose** for local development
-- **PostgreSQL 15** database
-
-## Getting Started
-
-### Prerequisites
-- Docker and Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.11+ (for local backend development)
-
-### Quick Start with Docker
+### Docker
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/analytics_dashboard.git
+git clone https://github.com/ryansansbury/analytics_dashboard.git
 cd analytics_dashboard
-
-# Start all services
-docker-compose up -d
-
-# Access the application at http://localhost:5001
+docker compose up
+docker compose exec backend python reseed.py   # once Postgres is accepting connections
 ```
 
-### Local Development
+The application comes up on <http://localhost:5001>.
 
-#### Backend
+### Local
+
 ```bash
 cd backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# Set environment variables
-cp .env.example .env
-# Edit .env with your database credentials
-
-# Run the development server (runs on http://localhost:5001)
-python run.py
+export DATABASE_URL=postgresql://localhost:5432/analytics_dashboard
+createdb analytics_dashboard
+python reseed.py        # generates the dataset, a few minutes
+python run.py           # http://localhost:5001
 ```
 
-#### Frontend
+Port 5001 rather than 5000 because AirPlay Receiver holds 5000 on macOS.
+
 ```bash
 cd frontend
-
-# Install dependencies
-npm install
-
-# Start development server (runs on http://localhost:5173)
-npm run dev
-
-# Build for production (outputs to dist/, copied to backend/static/)
-npm run build
+npm ci
+npm run dev             # http://localhost:5173
 ```
 
-#### Production Deployment
-The Flask backend serves both the API and the built frontend static files. After building the frontend, copy the `dist/` contents to `backend/static/`:
+The dev server proxies `/api` to Flask. Both halves share an origin and no CORS setup is needed locally.
+
+Check it came up with `curl -s localhost:5001/api/health`. That endpoint reports row counts and data age. Every other endpoint returns 200 with empty results against an empty database. Correct behaviour and indistinguishable from a broken deployment when you are looking at a blank page.
+
+### Production
 
 ```bash
-# Build frontend and copy to backend
 cd frontend && npm run build
 cp -r dist/* ../backend/static/
 ```
 
-## API Endpoints
+Flask then serves the API and the compiled interface from one origin with SPA fallback. `backend/static/` is gitignored. It is build output, and tracking it meant the committed bundle drifted away from the source that produced it.
 
-All endpoints support `start_date` and `end_date` query parameters (YYYY-MM-DD format).
+## API
 
-### Dashboard
-- `GET /api/dashboard/summary` - Complete dashboard data (KPIs, trends, categories, pipeline)
-- `GET /api/dashboard/kpis` - KPI values with change percentages
+28 endpoints across five blueprints. Full reference with response shapes in [`docs/API.md`](docs/API.md).
 
-### Revenue
-- `GET /api/revenue/trends` - Revenue time series (supports `granularity`: day/week/month)
-- `GET /api/revenue/by-category` - Revenue breakdown by product category
-- `GET /api/revenue/by-region` - Revenue breakdown by geographic region
-- `GET /api/revenue/by-channel` - Revenue breakdown by sales channel
-- `GET /api/revenue/top-products` - Top performing products (supports `limit`)
+| Prefix | Covers |
+|---|---|
+| `/api/dashboard` | KPI summary against the prior period |
+| `/api/revenue` | Trends plus breakdowns by category, region, and channel |
+| `/api/customers` | Segments, cohorts, lifetime value, and at-risk accounts |
+| `/api/operations` | Funnel, rep attainment, cycle time, and deal sizes |
+| `/api/forecasting` | Revenue forecast, churn risk, seasonality, and model metrics |
 
-### Customers
-- `GET /api/customers/overview` - Customer KPIs (total, new, churned, at-risk)
-- `GET /api/customers/segments` - Customer segmentation distribution
-- `GET /api/customers/cohorts` - 12-month cohort retention data
-- `GET /api/customers/lifetime-value` - LTV distribution by range
-- `GET /api/customers/acquisition` - Customer acquisition by channel over time
-- `GET /api/customers/at-risk` - At-risk customer list (supports `limit`)
+Everything is GET and returns JSON. There is no seeding endpoint. Seeding is destructive and lives at the command line.
 
-### Operations
-- `GET /api/operations/pipeline` - Sales pipeline by stage
-- `GET /api/operations/pipeline-kpis` - Pipeline KPIs (value, cycle time, win rate)
-- `GET /api/operations/sales-performance` - Sales rep quota attainment
-- `GET /api/operations/conversion-rates` - Stage-to-stage conversion rates
-- `GET /api/operations/cycle-time` - Average days per pipeline stage
-- `GET /api/operations/opportunities` - Pipeline opportunities (supports `stage`, `limit`)
-
-### Forecasting
-- `GET /api/forecasting/revenue` - Revenue forecast with confidence intervals
-- `GET /api/forecasting/pipeline` - Weighted pipeline forecast
-- `GET /api/forecasting/churn-risk` - At-risk customers with recommendations
-- `GET /api/forecasting/seasonality` - Monthly seasonality indices
-- `GET /api/forecasting/kpis` - Forecasting KPIs (predicted revenue, accuracy)
-- `GET /api/forecasting/model-performance` - ML model accuracy metrics
-- `GET /api/forecasting/revenue-at-risk` - Revenue at risk by category
-
-## Project Structure
+## Structure
 
 ```
 analytics_dashboard/
-├── frontend/                 # React frontend application
-│   ├── src/
-│   │   ├── components/       # Reusable UI components
-│   │   │   ├── cards/        # KPI and chart card wrappers
-│   │   │   ├── charts/       # Chart components (Area, Bar, Pie, Funnel)
-│   │   │   ├── common/       # Shared components (ErrorBoundary, Loading)
-│   │   │   ├── layout/       # Layout components (Header, Sidebar, Layout)
-│   │   │   └── tables/       # Data table components
-│   │   ├── hooks/            # Custom React hooks (useApi, useFilters)
-│   │   ├── pages/            # Page components (Dashboard, Revenue, etc.)
-│   │   ├── services/         # API client layer
-│   │   ├── types/            # TypeScript type definitions
-│   │   └── utils/            # Utilities (formatters, export)
-│   ├── package.json
-│   └── vite.config.ts
-├── backend/                  # Flask backend API
+├── backend/
 │   ├── app/
-│   │   ├── models/           # SQLAlchemy ORM models
-│   │   ├── routes/           # API route handlers by domain
-│   │   ├── __init__.py       # Application factory
-│   │   └── config.py         # Environment configurations
-│   ├── data/
-│   │   └── seed_data.py      # Synthetic data generator
-│   ├── static/               # Built frontend assets (production)
-│   ├── requirements.txt
-│   └── run.py                # Application entry point
-├── docker-compose.yml
-├── Dockerfile
-└── README.md
+│   │   ├── ml/               # features, churn, revenue, lazy-training registry
+│   │   ├── models/           # SQLAlchemy models, one per file
+│   │   ├── routes/           # five blueprints, one per domain
+│   │   ├── periods.py        # the time-bucketing rule
+│   │   └── __init__.py       # application factory and /api/health
+│   ├── data/seed_data.py     # synthetic data generator
+│   ├── scripts/snapshot.py   # freezes the API to JSON for the demo
+│   ├── tests/                # 117 tests
+│   └── reseed.py
+├── frontend/
+│   ├── public/data/          # the generated snapshot
+│   └── src/
+│       ├── components/       # cards, charts, tables, layout, filters
+│       ├── hooks/            # one query hook per endpoint, plus filters
+│       ├── pages/            # the five pages
+│       └── services/         # api client and the static adapter
+├── scripts/refresh-demo.sh   # regenerate and publish the demo
+└── docs/                     # API, architecture, decisions, setup
 ```
 
-## Environment Variables
+## Data
 
-### Backend
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | Required |
-| `SECRET_KEY` | Flask secret key for sessions | Required |
-| `FLASK_ENV` | Environment mode | `development` |
+Six tables holding products, customers, sales reps, transactions, pipeline, and daily metrics. Roughly 2,000 customers and 45,000 transactions across two years, generated by `backend/data/seed_data.py`.
 
-### Frontend
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `VITE_API_URL` | Backend API URL | `/api` (relative) |
+The generator is deterministic but anchors its window to today minus two years. Rerunning it reproduces the same dataset re-dated rather than a different one.
 
-## Database Schema
+Churn is driven by behaviour instead of assigned at random. A latent engagement variable drives transaction frequency and the churn hazard together. An earlier version assigned churn at random and no model could learn it. Any accuracy reported against that data had to be invented.
 
-The application uses 6 main tables:
+## Environment
 
-- **products** - Product catalog (name, category, pricing)
-- **customers** - Customer accounts (segment, LTV, status, acquisition)
-- **sales_reps** - Sales team (name, team, region, quota)
-- **transactions** - Completed orders linking customers, products, and reps
-- **pipeline** - Active sales opportunities with stage tracking
-- **daily_metrics** - Pre-aggregated daily metrics (optional)
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | local Postgres | Connection string |
+| `FLASK_ENV` | `development` | Selects the config class |
+| `SECRET_KEY` | dev placeholder | Set a real value in production |
+| `TEST_DATABASE_URL` | `..._test` | Tests only. Must end in `_test` |
+| `VITE_API_URL` | `/api` | API base. Unset uses the dev proxy |
+| `VITE_STATIC_DATA` | unset | `true` builds the static demo |
+
+## Docs
+
+- [`docs/API.md`](docs/API.md) covers every endpoint with parameters and response shapes.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers how the pieces fit.
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) records the choices and what each one cost, including the ones later reversed.
+- [`docs/SETUP.md`](docs/SETUP.md) goes deeper on installing and running it.
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
-
+[MIT](LICENSE).
