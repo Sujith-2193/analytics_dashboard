@@ -73,11 +73,59 @@ class TestMonthlyRevenue:
     def test_revenue_is_positive(self, revenue_frame):
         assert (revenue_frame["revenue"] > 0).all()
 
-    def test_partial_months_are_excluded_at_both_ends(self, revenue_frame):
+    def test_partial_months_are_excluded_at_both_ends(self, revenue_frame, ctx):
         """A half month reads as a demand collapse and wrecks the trend fit.
-        The opening month used to come through at roughly an eighth of normal."""
-        values = revenue_frame["revenue"].to_numpy()
-        assert len(values) >= 12
-        median = float(pd.Series(values).median())
-        assert values[0] > median * 0.4, "first month looks partial"
-        assert values[-1] > median * 0.4, "last month looks partial"
+        The opening month used to come through at roughly an eighth of normal.
+
+        This asserts the property directly rather than through a magnitude
+        heuristic. It previously required the first bucket to exceed 40% of the
+        series median, which conflates "partial" with "small": the seeded window
+        spans two years of growth, so the earliest complete month is legitimately
+        well under the median. That test sat about 4% from failing and flipped on
+        a one-day shift in the seed window, which is what a UTC runner produces
+        against a Pacific developer machine.
+        """
+        from app import db
+        from app.models import Transaction
+
+        first_txn, last_txn = (
+            db.session.query(
+                db.func.min(Transaction.transaction_date),
+                db.func.max(Transaction.transaction_date),
+            )
+            .filter(Transaction.status == "completed")
+            .one()
+        )
+
+        periods = list(revenue_frame["period"])
+        assert len(periods) >= 12
+
+        # A retained bucket must be one the data covers end to end.
+        assert periods[0].start_time.date() >= first_txn, (
+            f"first bucket {periods[0]} starts before the data does ({first_txn})"
+        )
+        assert periods[-1].end_time.date() <= last_txn, (
+            f"last bucket {periods[-1]} runs past the data ({last_txn})"
+        )
+
+    def test_a_partial_edge_month_is_actually_dropped(self, revenue_frame, ctx):
+        """The guard above passes trivially if nothing was ever dropped, so pin
+        that the boundary months are absent when the window starts or ends
+        mid-month."""
+        from app import db
+        from app.models import Transaction
+
+        first_txn, last_txn = (
+            db.session.query(
+                db.func.min(Transaction.transaction_date),
+                db.func.max(Transaction.transaction_date),
+            )
+            .filter(Transaction.status == "completed")
+            .one()
+        )
+        periods = set(revenue_frame["period"].astype(str))
+
+        if first_txn.day != 1:
+            assert pd.Period(first_txn, freq="M").strftime("%Y-%m") not in periods
+        if last_txn != (pd.Period(last_txn, freq="M").end_time.date()):
+            assert pd.Period(last_txn, freq="M").strftime("%Y-%m") not in periods
