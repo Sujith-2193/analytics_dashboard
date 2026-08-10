@@ -89,15 +89,37 @@ class TestRevenueForecast:
     def test_bounds_bracket_the_prediction_and_widen(self, client, ctx):
         """Intervals derive from holdout RMSE scaled by sqrt(horizon). They used
         to be a random 8-12% of the value."""
-        # The join point carries no band: it is a measured actual, not a
-        # prediction, so it has no uncertainty to draw.
         rows = [r for r in client.get("/api/forecasting/revenue?periods=6").get_json()
-                if r["predicted"] is not None and r["lowerBound"] is not None]
+                if r["predicted"] is not None]
         widths = []
         for row in rows:
             assert row["lowerBound"] <= row["predicted"] <= row["upperBound"]
             widths.append(row["upperBound"] - row["lowerBound"])
         assert widths[-1] > widths[0], "uncertainty should grow with horizon"
+
+    def test_every_predicted_point_carries_a_band(self, client, ctx):
+        """The band has to cover the dashed line for its whole length.
+
+        The join point used to carry null bounds, on the reasoning that a
+        measured value has no uncertainty. True of the number and wrong for the
+        chart: the dashed line started at the join and the shading started a
+        month later, so the first forecast segment was drawn with no interval
+        around it.
+        """
+        rows = client.get("/api/forecasting/revenue?periods=6").get_json()
+        for row in rows:
+            if row["predicted"] is None:
+                continue
+            assert row["lowerBound"] is not None, f"{row['date']} has no lower bound"
+            assert row["upperBound"] is not None, f"{row['date']} has no upper bound"
+
+    def test_the_band_opens_from_zero_width_at_the_join(self, client, ctx):
+        """Anchoring it at the last measurement is what makes the shading start
+        exactly where the forecast does rather than a step later."""
+        rows = client.get("/api/forecasting/revenue?periods=6").get_json()
+        join = [r for r in rows if r["actual"] is not None and r["predicted"] is not None]
+        assert len(join) == 1
+        assert join[0]["lowerBound"] == join[0]["upperBound"] == join[0]["actual"]
 
     def test_lower_bound_never_negative(self, client, ctx):
         rows = client.get("/api/forecasting/revenue?periods=12").get_json()

@@ -234,8 +234,20 @@ def get_revenue_forecast():
     # The join. The last actual month carries the predicted value too, set to
     # the actual, so the dashed line begins exactly where the solid one ends
     # instead of starting somewhere above or below it.
+    #
+    # It also carries a zero-width band, both bounds equal to the value. The
+    # bounds were null here on the reasoning that a measurement has no
+    # uncertainty to draw, and that is true of the number but wrong for the
+    # chart: the band then began one month after the dashed line did, leaving
+    # the first forecast segment with no interval around it and a visible step
+    # where the shading started. Uncertainty at the last observed point is
+    # genuinely zero, so anchoring the band there is the honest shape. It opens
+    # from a point at the join and widens with the horizon.
     if rows:
-        result[-1]['predicted'] = round(float(rows[-1].revenue), 2)
+        anchor = round(float(rows[-1].revenue), 2)
+        result[-1]['predicted'] = anchor
+        result[-1]['lowerBound'] = anchor
+        result[-1]['upperBound'] = anchor
 
     # Forecast: dashed continuation. The band widens with the square root of the
     # horizon, which is how forecast uncertainty compounds.

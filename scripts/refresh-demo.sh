@@ -134,7 +134,17 @@ for path in / /revenue /customers /operations /forecasting; do
   [ "$code" = "200" ] || die "$DEMO_URL$path returned $code"
 done
 
-live=$(curl -s -m 20 "$DEMO_URL/data/manifest.json" | "$PY" -c "import json,sys;print(json.load(sys.stdin)['snapshotDate'])")
-[ "$live" = "$SNAPSHOT_DATE" ] || die "live site reports $live but this build is $SNAPSHOT_DATE (edge cache may still be warming, re-check in a minute)"
+# Cache-busted on purpose. /data/* is served with a five minute edge cache, so
+# a plain request here can return the previous deploy's snapshot and make this
+# check either pass on stale data or fail on a deploy that actually worked.
+# A unique query string is a different cache key, so this reads the origin.
+#
+# Note what this does not prove: visitors during those five minutes may still be
+# served the previous snapshot from the edge. That is acceptable for a demo and
+# it is why the cache is short rather than immutable.
+live=$(curl -s -m 20 "$DEMO_URL/data/manifest.json?deploy=$RANDOM$RANDOM" \
+       | "$PY" -c "import json,sys;print(json.load(sys.stdin)['snapshotDate'])")
+[ "$live" = "$SNAPSHOT_DATE" ] || die "origin reports $live but this build is $SNAPSHOT_DATE"
 
 step "Live at $DEMO_URL, data as of $live"
+echo "  Edge cache on /data/* is 5 minutes, so a browser may lag the origin by that much."
