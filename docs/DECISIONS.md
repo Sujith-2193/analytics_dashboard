@@ -1,52 +1,211 @@
 # Decision Log
 
-Design decisions inferred from the code and git history. Each entry records the choice, the reasoning evident in the repo, and the trade-off. Where a rationale is inferred rather than documented, it is marked as such.
+Choices this codebase made, why, and what each one cost.
 
-## 1. Single Flask service serves both the API and the built React SPA
-**Decision.** Rather than deploy the React frontend and Flask backend as two separate services, the production setup builds the frontend to static files, places them in `backend/static/`, and lets Flask serve `index.html` (with SPA fallback for client routes) alongside the `/api/*` endpoints from one origin.
+Several entries record a decision that was later **reversed**. Those are kept
+rather than deleted, because the reasoning that made a bad decision look
+attractive at the time is the useful part, and a log that only shows the
+surviving choices teaches nothing about how they were arrived at.
 
-**Why (evident in code + history).** `create_app` detects `backend/static/` and conditionally registers `/` and `/<path:path>` routes. The 2025-12-25 commits "Include built frontend for simpler deployment" and "use backend as root" show this was a deliberate move to simplify Railway deployment to a single web process. Same-origin also removes the need for CORS/proxy config in production.
+---
 
-**Trade-off.** The frontend build output is committed to git (`backend/static/`, `frontend/dist/`), so those artifacts can drift from `frontend/src/` and must be rebuilt-and-committed on every UI change (hence the recurring "Update backend static assets" commits). The upside is a dead-simple deploy: one container, one process, one Postgres.
+## 1. Numbers are measured, never generated
 
-## 2. Synthetic data generated in-app, with deterministic date-seeded randomness
-**Decision.** All data is produced by `backend/data/seed_data.py` (Faker) and stored in Postgres; on top of that, many displayed metrics (change %, retention, cycle times, attainment, forecast jitter, model accuracy) are generated at request time using `random.seed(hash(start_date) % N)`.
+**Decision.** Every figure the API reports is derived from stored rows or from a
+model scored on a holdout. Where a value cannot be computed, the response
+carries `null` and the interface renders a blank.
 
-**Why (inferred).** The goal is a convincing, self-contained demo with no external data dependency. Seeding randomness by the selected date range makes the dashboard *stable on refresh* but *responsive to filter changes* — the git history's "data variation for all pages when switching time periods" and "Remove ALL zeros" commits show this was an explicit product goal.
+**Reversal of an earlier decision.** This application previously generated many
+displayed metrics at request time with `random.seed(hash(start_date))`: change
+percentages, retention, cycle times, quota attainment, forecast intervals, and
+model accuracy. The reasoning was defensible in isolation. Seeding by the
+selected date range made the dashboard stable on refresh but responsive to
+filter changes, which reads as real behaviour, and it guaranteed no empty
+charts.
 
-**Trade-off.** The dashboard looks like real analytics but isn't; several "metrics" are cosmetic. This is fine for a demo and actively harmful if mistaken for a real reporting tool. It also means the numbers are not internally derivable from the stored rows, which is why shared helper functions exist to keep pages agreeing (see Decision 4).
+**Why it was wrong.** It was not that the numbers were fake, it was that nothing
+distinguished the fake ones from the real ones. `/api/forecasting/model-performance`
+reported ROC AUC and MAPE for models that did not exist. Sales performance
+computed real per-rep revenue and then overwrote `attainment` with a
+manufactured 145-to-61 curve. A reader had no way to know which was which, and
+neither did the next person to change the code.
 
-## 3. Auto-seed and auto-reseed on startup
-**Decision.** On boot, the app creates tables and, if the newest transaction is missing or older than 7 days, regenerates the entire dataset (`TRUNCATE` + reload). A standalone `reseed.py` covers scheduled reseeding.
+**Cost of the current rule.** Some fields are now permanently `null`, and blank
+space is less impressive than a number. `pipelineChange` cannot be computed
+because pipeline rows carry current state rather than history, so it stays null
+instead of being estimated. That is the trade accepted.
 
-**Why (evident).** The 2026-06-25 commit "Auto-reseed on startup when data is older than 7 days" plus the 2026-02-13 Railway cron script show the intent: a hosted demo should always display "recent" data without manual intervention.
+**Enforced by.** `backend/tests/test_forecasting_api.py` asserts endpoint output
+equals the trained model exactly rather than approximately.
+`backend/tests/test_consistency.py` asserts two identical requests return
+identical bytes, which rules out a PRNG behind any figure.
 
-**Trade-off.** Startup can be slow and destructive — any manually entered data is wiped whenever the freshness check trips. The freshness/seed logic is wrapped in bare `try/except`, so failures are silent (the app serves empty data instead of crashing), which trades debuggability for uptime.
+---
 
-## 4. Shared helper functions for cross-endpoint consistency
-**Decision.** Generation of pipeline metrics, at-risk customers/risk scores, and "model performance" is centralized in `operations.get_pipeline_metrics`, `forecasting.get_at_risk_customers_with_scores`, and `forecasting.get_model_metrics`, imported across blueprints.
+## 2. Two real models, validated the way their task requires
 
-**Why (evident).** Because numbers are partly generated, the same figure could otherwise differ between the Dashboard, Customers, and Forecasting pages. These helpers exist so a value shown twice matches. The 2025-12-29 "consistent data" commit reflects this.
+**Decision.** Churn is a `GradientBoostingClassifier` over RFM features, tenure,
+refund rate, and account attributes, scored on a **stratified** holdout. Revenue
+is a `Ridge` regression on trend, cyclical seasonality, and two autoregressive
+lags, scored on a **chronological** holdout and reported next to a last-value
+naive baseline.
 
-**Trade-off.** It introduces cross-blueprint imports (e.g. `dashboard.py` imports from `operations.py`; `customers.py` imports from `forecasting.py`), coupling the route modules together. Acceptable at this size; a service layer would be cleaner if it grew.
+**Why chronological for the forecast.** A shuffled split lets a time-series
+model train on the future and predict the past, which produces excellent
+validation numbers and a useless model. The split has to respect the arrow of
+time or the metric is a lie.
 
-## 5. Forecasting with NumPy linear regression, not scikit-learn
-**Decision.** Revenue forecasting fits a degree-1 trend with `numpy.polyfit` and adds random variance for confidence bands; "model performance" metrics are random. `scikit-learn` and `pandas` are listed in `requirements.txt` but never imported.
+**Why the naive baseline is reported.** MAPE alone does not say whether a model
+is worth running. Against a last-value baseline it does. The forecast currently
+sits at 3.58% against 5.82%, so it earns its keep by a real but unremarkable
+margin, and the API says so.
 
-**Why (inferred).** A real trained model is unnecessary for a demo, and a linear trend on the seeded upward-growth data looks plausible. The sklearn/pandas entries appear aspirational (or leftover), matching the README's "ML-powered" framing.
+**Cost.** `r2Score` for the revenue model is negative, which looks alarming
+next to a 3.58% MAPE. Both are correct: R² measures against the holdout's own
+mean, and a short, nearly flat holdout makes that mean a strong competitor. The
+figure stays in the API rather than being suppressed, and the interface leads
+with the comparison that is actually informative.
 
-**Trade-off.** The framing oversells the capability. Keeping unused heavy dependencies inflates the image and install time (see `DEPENDENCIES.md`). Removing them would be safe.
+---
 
-## 6. No authentication, open CORS
-**Decision.** No auth anywhere; `CORS(..., origins: "*")` for `/api/*`; the seed endpoint is public.
+## 3. The seed data has to be learnable, and must not leak its own label
 
-**Why (inferred).** It's a read-only public demo of synthetic data; there is nothing to protect.
+**Decision.** Churn in `backend/data/seed_data.py` is behaviour-driven: a latent
+engagement variable drives transaction frequency, and the same variable drives
+the churn hazard alongside segment and tenure. The engagement value and the
+churn date are stripped from the row before insert.
 
-**Trade-off.** Anyone can hit `/api/seed-database` and trigger a full destructive reseed. Fine for throwaway demo data; unacceptable if real data were ever added. See `RUNBOOK.md`.
+**Why.** An earlier dataset assigned churn at random, which meant no model could
+learn it and any reported accuracy had to be fabricated. The failure was
+upstream of the modelling code. Making the label a consequence of behaviour that
+the features can see is what allows an honest 0.959 ROC AUC.
 
-## 7. Stack choice: Flask + SQLAlchemy + PostgreSQL / React 19 + Vite + Recharts + TanStack Query
-**Decision.** A conventional, well-supported full-stack combination rather than a meta-framework (Next.js) or a BI tool.
+**Why the cause is stripped.** If `engagement` were stored, the model would read
+the label's cause directly and score near-perfectly, which would be a leak
+rather than a result.
 
-**Why (inferred).** Maximizes control and demonstrates end-to-end skills (custom REST API, ORM modeling, SPA data fetching/caching, charting) — consistent with a portfolio project. Recharts + TanStack Query cover charts and server-state caching with minimal glue.
+---
 
-**Trade-off.** More hand-written plumbing (one API function + one hook per endpoint) than a batteries-included framework, but no framework lock-in and a transparent, readable codebase.
+## 4. One bucketing rule, defined once
+
+**Decision.** `backend/app/periods.py` owns a single rule: a period the window
+only partly covers is not plotted. Every time-series endpoint calls
+`drop_incomplete_tail`.
+
+**Why.** The same data trended upward under a 90-day filter and fell off a cliff
+under Year to Date. Nothing was wrong with the query. A nine-day month holds
+nine days of revenue, and next to twelve complete months that reads as demand
+collapsing. Bucketed weekly the same shortfall is invisible, which is why the
+defect looked like an inconsistency between pages rather than one rule missing.
+
+**Cost.** The most recent period is never shown, so the dashboard is always
+slightly behind. That is the correct trade: a missing bar is honest, a short bar
+is misleading.
+
+---
+
+## 5. Seeding is a command, not an endpoint or a startup step
+
+**Decision.** `python reseed.py`. The application factory creates tables and
+stops there.
+
+**Reversal of two earlier decisions.** The app used to auto-reseed on boot when
+the newest transaction was more than a week old, and exposed
+`GET /api/seed-database` for the same purpose. Both aimed at a hosted demo that
+always looks current without manual intervention.
+
+**Why they were wrong.** The auto-reseed recursed infinitely: `seed_database()`
+called `create_app()`, which reached the freshness check, found the database
+still empty, and called `seed_database()` again. Each level opened its own
+engine, so it terminated only by exhausting the server's connections. A bare
+`except Exception: pass` hid the failure completely. The endpoint was an
+unauthenticated destructive operation reachable by anyone who guessed the URL.
+
+**What replaced the goal.** The demo stays current through
+`scripts/refresh-demo.sh`, run deliberately, with a test gating the deploy.
+
+---
+
+## 6. Destructive test fixtures require an opt-in database name
+
+**Decision.** `tests/conftest.py` refuses to run against a database whose name
+does not end in `_test`.
+
+**Why.** `pg_app` calls `drop_all()`. On 2026-08-09 the suite was pointed at the
+development database and destroyed the real dataset, replacing it with the small
+fixture set. Every test passed, because fixture data is perfectly valid. The
+snapshot built from it reached production before anyone noticed.
+
+**The general lesson.** A destructive fixture must not depend on the operator
+having aimed carefully. The blast radius has to be bounded by something the code
+can check.
+
+---
+
+## 7. The hosted demo is a static build, not a running service
+
+**Decision.** `backend/scripts/snapshot.py` runs the real pipeline against real
+PostgreSQL, trains both models, walks every endpoint the UI calls under every
+date preset, and freezes the responses to JSON. The React build reads those
+files. One environment flag switches transports; every API function, hook, and
+component is identical across the two modes.
+
+**Why.** Serving the demo live would mean paying for a database, waiting through
+a cold start while two models train, and running a job to stop the seeded window
+drifting into the past. None of that shows a visitor anything the JSON does not.
+
+**The hard part was time.** Presets like "last 90 days" resolve against today, so
+a snapshot taken on one date stops matching the next morning. Rather than key
+files on preset names and translate between them, the snapshot records the date
+it was taken and static mode treats that as today. The request path then works
+directly as the cache key with nothing in between to drift.
+
+**Cost.** The demo ages. Its data is frozen at the snapshot date, which the
+sidebar states rather than letting the page imply currency. Unpredictable
+breakage was traded for predictable staleness.
+
+**Enforced by.** `frontend/src/services/staticData.test.tsx` mounts every page
+under every preset against the snapshot and fails on any request it does not
+cover, so a missing endpoint breaks a test rather than producing a blank chart.
+
+---
+
+## 8. PostgreSQL is required, not one option among several
+
+**Decision.** No SQLite fallback for the cross-endpoint suite.
+
+**Why.** Most time-series queries use `date_trunc`, which SQLite has no
+equivalent for. A fallback would mean either two query paths or tests that pass
+against a database the application never runs on. CI starts a PostgreSQL service
+so the consistency checks run there rather than skipping.
+
+**Cost.** A contributor without PostgreSQL sees those tests skip. The unit tests
+still run, so a fresh clone is not blocked.
+
+---
+
+## 9. Same-origin single service
+
+**Decision.** The production build places the compiled frontend where Flask can
+serve it, so the API and the SPA share an origin.
+
+**Why.** It removes CORS and proxy configuration from production entirely, and
+it is one process to deploy.
+
+**Amended 2026-08-09.** That build output used to be committed to git. It is now
+ignored. Tracking it meant the committed bundle drifted out of sync with the
+source that produced it, and every rebuild wrote another 700 KB blob into
+history. Five versions accumulated before it was caught.
+
+---
+
+## 10. No authentication
+
+**Decision.** None anywhere. CORS is open for `/api/*`.
+
+**Why.** Every endpoint is a read over synthetic data, and there is nothing to
+protect. The one operation that was genuinely dangerous, seeding, is no longer
+reachable over HTTP at all.
+
+**Cost.** Adding real data to this application would require auth first, not as
+a later hardening pass.

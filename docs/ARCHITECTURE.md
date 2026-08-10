@@ -1,88 +1,148 @@
 # Architecture
 
-## The pieces and how they connect
+A Flask REST API over PostgreSQL, a React SPA that consumes it, and two
+scikit-learn models trained on the application's own data. The hosted demo is a
+static build of the same application; see the end of this document.
 
 ```
-Browser (React SPA)
-  │
-  │  fetch()  →  /api/*   (JSON)
-  ▼
-Flask app  (backend/app/__init__.py: create_app)
-  ├── Blueprints (one per domain)
-  │     dashboard.py  revenue.py  customers.py  operations.py  forecasting.py
-  ├── SQLAlchemy models → PostgreSQL
-  └── Static file serving (serves the built React app in production)
-        static_folder = backend/static/
+React 19 SPA  ──fetch──▶  Flask /api/*  ──SQLAlchemy──▶  PostgreSQL
+     │                        │
+ TanStack Query          app/ml/registry
+ (server cache)          (lazy-trained models)
 ```
 
-There are two runtime topologies:
+---
 
-- **Development (recommended local path):** Vite dev server runs the React app on port `3000` and proxies `/api/*` to the Flask API on port `5001`. The two processes are separate. (`frontend/vite.config.ts`, `backend/run.py`.)
-- **Production (Railway / gunicorn / single container):** the frontend is built (`npm run build`) and its output is placed in `backend/static/`. Flask serves both the API and the SPA from one origin, so no CORS or proxy is needed. `create_app` detects `backend/static/` and, if present, registers routes for `/` and `/<path:path>` with SPA fallback to `index.html`.
+## Backend
 
-`backend/static/` currently contains a committed build (`index.html`, `assets/index-*.js`, `assets/index-*.css`), so the deployed app can serve the UI without a build step. `frontend/dist/` is the local Vite build output that gets copied into `backend/static/`, but it is git-ignored (`frontend/.gitignore`) and not committed — only the copy under `backend/static/` is checked into git. That committed bundle is a build output kept for deployment convenience; the source of truth is `frontend/src/`.
+```
+backend/app/
+  __init__.py      application factory, /api/health, static serving
+  config.py        per-environment config
+  periods.py       the time-bucketing rule, shared by every series endpoint
+  models/          SQLAlchemy models, one per file
+  routes/          five blueprints, one per domain
+  ml/
+    features.py    RFM and monthly-revenue feature frames
+    churn.py       gradient-boosted classifier
+    revenue.py     ridge regression forecast
+    registry.py    lazy training, cached per process
+```
 
-## Backend structure
+### Application factory
 
-**Application factory** (`backend/app/__init__.py`)
-- `create_app(config_name)` builds the Flask app, selects config by `FLASK_ENV` (default `development`), initializes SQLAlchemy and CORS, and registers the five domain blueprints plus a couple of utility routes.
-- `ProxyFix` is applied so Railway/Heroku-style proxy headers (`X-Forwarded-*`) are trusted for correct HTTPS/host handling.
-- On startup it runs `db.create_all()` (idempotent) and then **auto-reseeds** if `max(transactions.transaction_date)` is `NULL` or older than 7 days. Both steps are wrapped in bare `try/except` that swallow all errors, so a failing DB connection at boot does not crash the process — it just serves empty data.
+`create_app(config_name)` initialises SQLAlchemy, opens CORS on `/api/*`,
+registers the five blueprints, and calls `db.create_all()`. Creating tables is
+idempotent and safe. Populating them is neither, and does not happen here.
 
-**Utility routes** (registered in the factory, not in a blueprint)
-- `GET /api/health` — returns `{status, environment}`.
-- `GET /api/seed-database` — one-time seeding trigger; the code comments mark it "remove after seeding". It is unauthenticated.
+The factory previously auto-reseeded when data looked stale. That recursed
+infinitely, because `seed_database()` calls `create_app()`, which reached the
+same check and called `seed_database()` again, terminating only by exhausting
+the database's connections. See `DECISIONS.md` entry 5.
 
-**Config** (`backend/app/config.py`)
-- `DevelopmentConfig` (default), `ProductionConfig`, `TestingConfig` (SQLite in-memory — but there are no tests that use it).
-- `ProductionConfig` rewrites `postgres://` → `postgresql://` (Heroku/Railway legacy URL format).
-- Engine options set `pool_pre_ping=True` and `pool_recycle=300` to survive dropped Postgres connections.
+### Route blueprints
 
-**Models** (`backend/app/models/`) — SQLAlchemy ORM, one file per table:
-`Product`, `Customer`, `SalesRep`, `Transaction`, `Pipeline`, `DailyMetric`. Each has a `to_dict()` that converts snake_case columns to **camelCase** JSON keys and casts `Numeric`/`Date` to JSON-friendly types. Relationships wire `Transaction`/`Pipeline` back to `Customer`, `Product`, and `SalesRep`.
+Five, each mounted under its own prefix: `dashboard`, `revenue`, `customers`,
+`operations`, `forecasting`. Handlers query through SQLAlchemy, convert
+snake_case to camelCase, and return JSON.
 
-> **`daily_metrics` is vestigial.** The `DailyMetric` model exists and its table is created, but nothing seeds it and no route queries it. It is dead schema.
+Some helpers are shared across blueprints so that a figure appearing on two
+pages cannot differ: the churn scoring behind both `/customers/at-risk` and
+`/forecasting/churn-risk`, and the pipeline aggregate behind both
+`/dashboard/summary` and `/operations/pipeline`. This couples the route modules
+to each other, which is acceptable at this size and would want a service layer
+if it grew.
 
-**Routes** (`backend/app/routes/`) — each blueprint owns a URL prefix (`/api/dashboard`, `/api/revenue`, `/api/customers`, `/api/operations`, `/api/forecasting`). Endpoints read `start_date`/`end_date` query params (default windows vary per endpoint), run aggregation queries with SQLAlchemy `func.sum/count/avg` + `date_trunc`, and return plain lists/dicts (Flask jsonifies them).
+### The bucketing rule
 
-## Frontend structure
+`app/periods.py` exists so that one rule has one home: **a period the window
+only partly covers is not plotted.** Every time-bucketed endpoint calls
+`drop_incomplete_tail`, and `app/ml/features.monthly_revenue` applies the same
+rule to the model's training input, so the forecast and the chart never disagree
+about what a month is.
 
-**Providers** (`frontend/src/App.tsx`, top to bottom): `ErrorBoundary` → `QueryClientProvider` → `FilterProvider` → `BrowserRouter`. React Query defaults: `retry: 1`, `refetchOnWindowFocus: false`, `staleTime: 5min` (individual hooks override to `30s`).
+### Models
 
-**Global filter state** (`frontend/src/hooks/useFilters.tsx`)
-- A React context holds the active `dateRange` (plus unused `region`/`segment`/`category` slots).
-- Date presets: `last7d`, `last30d`, `last90d`, `ytd`, `lastYear`, `custom`. Default is **`last90d`**. (Note: the header UI in `Header.tsx` exposes all five presets, even though commit history at one point removed "Last 7 days"/"Year to date" — they are present again in the current code.)
+Trained lazily on first use and cached for the process lifetime by
+`app/ml/registry.py`. The registry returns `None` when a model cannot be fit,
+and callers report `available: false` rather than inventing a figure. Nothing
+trains at import time, so a cold start does not pay for training it may not
+need.
 
-**Data layer**
-- `frontend/src/services/api.ts` — one typed function per endpoint, grouped into `dashboardApi`, `revenueApi`, `customerApi`, `operationsApi`, `forecastingApi`, `healthApi`. Base URL is `import.meta.env.VITE_API_URL || '/api'`.
-- `frontend/src/hooks/useApi.ts` — a React Query hook per endpoint. Each hook pulls `dateRange` from `useFilters()`, puts it in the query key, and uses `keepPreviousData` so charts don't flash empty when the date range changes.
+- **Churn** — `GradientBoostingClassifier` over RFM features, tenure, refund
+  rate, spend trend, and account attributes. Stratified holdout. Reports ROC
+  AUC, average precision, precision, recall, F1, Brier score, and gain-based
+  feature importance.
+- **Revenue** — `Ridge` over trend, cyclical month encodings, and two
+  autoregressive lags, inside a `ColumnTransformer`. Chronological holdout,
+  never shuffled. Reported against last-value and seasonal-naive baselines.
+  Intervals come from holdout RMSE scaled by the square root of the horizon.
 
-**UI composition** — `pages/*` compose `components/cards/*` (KPICard, ChartCard), `components/charts/*` (Area, Bar, Pie/Donut, Funnel — all Recharts wrappers), `components/tables/DataTable`, and `components/layout/*` (Layout, Header, Sidebar). `utils/export.ts` builds CSV/JSON/PDF client-side.
+---
 
-## Data flow (one request, end to end)
+## Frontend
 
-1. User picks a date preset in `Header` → `setDatePreset` updates `FilterProvider` state.
-2. Every mounted `useApi` hook has that date range in its query key, so React Query refetches.
-3. The hook calls the matching `api.ts` function, which builds a query string and `fetch`es `/api/<domain>/<resource>?start_date=…&end_date=…`.
-4. Flask routes the request to a blueprint handler, which parses the dates, runs SQLAlchemy aggregations against Postgres, mixes in date-seeded synthetic values where applicable, and returns JSON.
-5. React Query caches the result under the query key; the page re-renders its Recharts charts and tables.
+```
+frontend/src/
+  services/api.ts          one typed function per endpoint
+  services/staticData.ts   static-mode transport for the hosted demo
+  hooks/useApi.ts          one TanStack Query hook per endpoint
+  hooks/useFilters.tsx     global date range and dimension filters
+  pages/                   five routed pages
+  components/              cards, charts, tables, layout, filters, common
+  utils/formatters.ts      currency, number, date, and chart colour helpers
+```
 
-## Where the complexity lives, and why
+**Data flow.** A page calls a hook, the hook calls a service function, the
+service function calls `fetchApi`. TanStack Query owns caching, deduplication,
+and loading state. The query key includes the active date range, so changing a
+filter refetches rather than reusing a stale entry.
 
-The genuinely non-obvious part of this codebase is **not** the plumbing (Flask + SQLAlchemy + React Query is standard). It is the deliberate blending of real aggregation with generated numbers to make a demo look convincing. Key patterns:
+**One interception point.** Every request goes through `fetchApi`. That is what
+makes the static build possible without a parallel code path: the transport
+changes, nothing above it does.
 
-- **Deterministic randomness seeded by date.** Many endpoints call `random.seed(hash(start_date) % N + offset)` before generating "change %", retention, cycle times, etc. Effect: results are *stable* for a given date range (so refreshing doesn't reshuffle the dashboard) but *differ* across ranges (so switching presets visibly changes the numbers). This is intentional and load-bearing for the demo feel.
-- **"Never show a zero" logic.** `dashboard.py`'s `ensure_nonzero()` replaces any zero/None change with a random positive value in a curated band. Several commits ("Remove ALL zero fallbacks", "ensure NO zeros") were dedicated to this.
-- **Curated attainment curve.** `operations.py get_sales_performance()` computes real per-rep revenue, then *overwrites* attainment with a hand-shaped distribution (top 6 exceed quota, middle 6 near quota, bottom below) so the "Sales Team Performance" panel always tells a growth story.
-- **Cross-endpoint consistency helpers.** To keep numbers agreeing across pages, three shared functions centralize generation:
-  - `operations.get_pipeline_metrics()` — pipeline value / win rate / avg deal size (used by dashboard **and** operations).
-  - `forecasting.get_at_risk_customers_with_scores()` — the at-risk customer list and per-customer risk scores (used by `/customers/at-risk`, `/customers/overview`, `/forecasting/churn-risk`, `/forecasting/kpis`, `/forecasting/revenue-at-risk`).
-  - `forecasting.get_model_metrics()` — the fake model-accuracy block (used by `/forecasting/kpis` and `/forecasting/model-performance`).
-  These exist specifically so the same figure shown on two pages matches.
-- **Forecasting math.** `/forecasting/revenue` fits a degree-1 trend line to historical monthly revenue with `numpy.polyfit`, bridges from the last actual month, projects `periods` months forward, and adds ±random variance for the confidence band. It is real regression on synthetic history, wrapped in random jitter — not a statistical model with fitted uncertainty.
+**Charts.** Recharts, wrapped in project components (`AreaChart`, `BarChart`,
+`FunnelChart`, `PieChart`) so palette, axis formatting, gridlines, and tooltip
+behaviour are set in one place rather than per page. Chart colour tokens live in
+plain `:root` rather than Tailwind's `@theme`, because Tailwind v4 prunes theme
+tokens it cannot see referenced in markup and silently dropped two funnel colours.
 
-## Known internal inconsistencies (documented, not fixed)
+---
 
-- **`DashboardSummary` type vs. actual response.** The TS type `DashboardSummary` (`frontend/src/types/index.ts`) declares `revenueTrend`, `revenueByCategory`, `topProducts`, `pipelineSummary`, `recentCustomers`, but the `/api/dashboard/summary` endpoint returns only `{ kpis, dateRange }`. The Dashboard page fetches those other sections from separate endpoints. As a side effect, the CSV/JSON/PDF export (`utils/export.ts`), which pulls only from `/dashboard/summary`, emits KPIs but leaves the trend/category/products/pipeline sections empty (they are guarded by `?.length`).
-- **Two endpoints are not in the README.** `/api/operations/deal-size-distribution` and the utility routes `/api/health` and `/api/seed-database` exist in code. `API.md` lists everything.
-- **Port configuration is inconsistent across files.** See `SETUP.md` for the full table; the short version is that `run.py` hardcodes `5001` while `docker-compose.yml` maps `5000`.
+## Data
+
+Six tables: `customers`, `products`, `transactions`, `pipeline`, `sales_reps`,
+`daily_metrics`. Roughly 2,000 customers and 45,000 transactions across a
+two-year window, generated by `backend/data/seed_data.py`.
+
+The generator is deterministic (seed 42 across Faker, `random`, and NumPy) but
+anchors its window to the current date minus two years, so regenerating produces
+the same dataset re-dated to today rather than a different one.
+
+Churn is behaviour-driven rather than assigned at random: a latent engagement
+variable drives both transaction frequency and the churn hazard, and is stripped
+from the row before insert so no model can read the label's cause back out.
+
+---
+
+## The static build
+
+The application runs against live PostgreSQL. The hosted demo is a build
+artifact of it.
+
+`backend/scripts/snapshot.py` boots the real Flask app, trains both models,
+walks every endpoint the UI calls under all five date presets, and writes the
+responses to `frontend/public/data/`. With `VITE_STATIC_DATA=true`,
+`fetchApi` resolves those files instead of the network.
+
+The one hard problem is time. Presets resolve against today, so a snapshot taken
+on one date stops matching the next. The snapshot records the date it was taken
+and static mode treats that as today, which keeps request paths usable directly
+as cache keys with no separate mapping to drift.
+
+`frontend/src/services/staticData.test.tsx` mounts every page under every preset
+against the generated snapshot and fails on any request the snapshot does not
+contain, so an uncovered endpoint breaks a test rather than a chart.
+
+The live build tree-shakes the static path out entirely.

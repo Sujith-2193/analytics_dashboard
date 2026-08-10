@@ -1,32 +1,65 @@
 # API Reference
 
-All endpoints are **HTTP GET**, return **JSON**, and require **no authentication**. CORS is open for `/api/*` (`origins: "*"`). Base path is `/api`. In production the API is same-origin with the frontend; in dev the Vite server proxies `/api` to the Flask app.
+All endpoints are **HTTP GET**, return **JSON**, and require **no authentication**.
+CORS is open for `/api/*`. The base path is `/api`. In production the API is
+same-origin with the frontend; in development the Vite server proxies `/api` to
+Flask on port 5001.
 
-Conventions:
-- `start_date` / `end_date` are `YYYY-MM-DD`. Defaults differ per endpoint (noted below); when a default is "30d" it means `today − 30 days` to `today`, computed server-side from the current date.
-- Only `Transaction.status == 'completed'` rows are counted in revenue aggregations unless stated otherwise.
-- Many fields are generated with date-seeded randomness (see `ARCHITECTURE.md`); response *shapes* below are exact, response *values* are partly synthetic.
-- Field names in responses are **camelCase** (converted from snake_case DB columns).
+## Conventions
+
+- `start_date` and `end_date` are `YYYY-MM-DD`. Defaults are computed
+  server-side from the current date and differ per endpoint, noted below.
+- Revenue aggregations count only `Transaction.status == 'completed'`.
+- Response fields are **camelCase**, converted from snake_case columns.
+- **Every figure is derived from stored rows or from a trained model.** Where a
+  value cannot be computed, the field is `null` rather than estimated. A null
+  `*Change` field means there is no prior period to compare against, not that
+  the change is zero.
+- **Time-bucketed series omit a trailing period the window only partly covers.**
+  See `app/periods.py`. A part-month plotted beside complete months reads as a
+  collapse, so it is dropped rather than shown.
 
 ---
 
-## Utility (registered in the app factory)
+## Utility
 
 ### `GET /api/health`
-No params. Does **not** touch the database.
+
+Liveness plus data readiness. Reports row counts and the age of the newest
+transaction, because every endpoint degrades gracefully on an empty database
+and returns 200 with empty results, which is correct but indistinguishable from
+a broken deployment when you are looking at a blank dashboard.
+
 ```json
-{ "status": "healthy", "environment": "development" }
+{
+  "status": "healthy",
+  "environment": "development",
+  "data": {
+    "seeded": true,
+    "counts": { "customers": 0, "transactions": 0, "pipeline": 0 },
+    "latestTransaction": "YYYY-MM-DD",
+    "ageInDays": 0
+  }
+}
 ```
 
-### `GET /api/seed-database`
-No params. **Destructive and unauthenticated** — truncates and regenerates all tables. On success `{ "status": "success", "message": "Database seeded successfully" }`; on error returns HTTP 500 with `{ "status": "error", "message": "...", "trace": "..." }`. Marked "remove after seeding" in the code.
+`status` is `"degraded"` with a `hint` field when the database is empty or the
+tables are missing.
+
+> There is no seeding endpoint. Seeding is destructive and belongs at the
+> command line: `python reseed.py`. It was previously exposed as an
+> unauthenticated `GET /api/seed-database`, which meant anyone who found the URL
+> could wipe and regenerate the dataset.
 
 ---
 
 ## Dashboard — `/api/dashboard`
 
 ### `GET /api/dashboard/summary`
-Params: `start_date` (default 30d), `end_date` (default today). Computes current-vs-previous-period KPIs; pipeline value comes from the shared `get_pipeline_metrics` helper. Change percentages are forced non-zero (curated random bands).
+
+Params: `start_date` (default 30d), `end_date` (default today). Current period
+against the preceding period of equal length.
+
 ```json
 {
   "kpis": {
@@ -40,40 +73,54 @@ Params: `start_date` (default 30d), `end_date` (default today). Computes current
 ```
 
 ### `GET /api/dashboard/kpis`
-Identical to `/summary` (it calls the same handler). Same params and response.
+
+Calls the same handler as `/summary`. Identical params and response.
 
 ---
 
 ## Revenue — `/api/revenue`
 
 ### `GET /api/revenue/trends`
-Params: `start_date` (default **365d**), `end_date` (default today), `granularity` = `day` | `week` | `month` (default `day`). Aggregates completed-transaction revenue and order count per period.
+
+Params: `start_date` (default 365d), `end_date`, `granularity` = `day` | `week`
+| `month` (default `day`). Under `week` and `month` an incomplete trailing
+bucket is dropped.
+
 ```json
 [ { "date": "YYYY-MM-DD", "revenue": 0, "orders": 0 } ]
 ```
 
 ### `GET /api/revenue/by-category`
-Params: `start_date` (30d), `end_date`. Revenue grouped by product category, descending.
+
+Params: `start_date` (30d), `end_date`. Descending by revenue.
+
 ```json
 [ { "category": "Enterprise Software", "value": 0, "percentage": 0 } ]
 ```
 
 ### `GET /api/revenue/by-region`
-Params: `start_date` (30d), `end_date`. `growth` is hard-coded to `0` (no historical comparison implemented).
+
+Params: `start_date` (30d), `end_date`. `growth` is `null` when no prior period
+is available.
+
 ```json
-[ { "region": "North America", "revenue": 0, "customers": 0, "growth": 0 } ]
+[ { "region": "North America", "revenue": 0, "customers": 0, "growth": null } ]
 ```
 
 ### `GET /api/revenue/by-channel`
-Params: `start_date` (30d), `end_date`. Grouped by `channel` (`direct` | `online` | `partner`).
+
+Params: `start_date` (30d), `end_date`.
+
 ```json
-[ { "channel": "direct", "value": 0, "percentage": 0 } ]
+[ { "channel": "Direct Sales", "value": 0, "percentage": 0 } ]
 ```
 
 ### `GET /api/revenue/top-products`
-Params: `start_date` (30d), `end_date`, `limit` (default 10). `growth` is hard-coded `0`; `avgPrice` = revenue / units.
+
+Params: `start_date` (30d), `end_date`, `limit` (default 10).
+
 ```json
-[ { "id": 1, "name": "…", "category": "…", "revenue": 0, "unitsSold": 0, "growth": 0, "avgPrice": 0 } ]
+[ { "id": 0, "name": "", "category": "", "revenue": 0, "unitsSold": 0, "avgPrice": 0, "growth": null } ]
 ```
 
 ---
@@ -81,166 +128,239 @@ Params: `start_date` (30d), `end_date`, `limit` (default 10). `growth` is hard-c
 ## Customers — `/api/customers`
 
 ### `GET /api/customers/overview`
-Params: `start_date` (30d), `end_date`. `churned` is estimated by scaling total churned customers across a 2-year window. All `*Change` fields are curated random percentages (`atRiskChange` is intentionally slightly negative). At-risk count comes from the shared `get_at_risk_customers_with_scores` helper.
+
+Params: `start_date` (30d), `end_date`. `churnedChange` and `atRiskChange` are
+`null` because neither is observable for a prior period from a point-in-time
+status column. `churnedScope` states what the churn count covers.
+
 ```json
 {
   "total": 0, "totalChange": 0,
   "new": 0, "newChange": 0,
-  "churned": 0, "churnedChange": 0,
-  "atRisk": 0, "atRiskChange": 0
+  "churned": 0, "churnedChange": null, "churnedScope": "",
+  "atRisk": 0, "atRiskChange": null
 }
 ```
 
 ### `GET /api/customers/segments`
-Params: `start_date` (30d), `end_date`. Customers with completed transactions in the period, grouped by segment.
+
+Params: `start_date` (30d), `end_date`.
+
 ```json
 [ { "segment": "enterprise", "count": 0, "revenue": 0, "percentage": 0 } ]
 ```
 
 ### `GET /api/customers/cohorts`
-Params: `start_date` (default **365d**), `end_date`. Up to 12 acquisition-month cohorts. Retention months 1–11 are generated from a base decay curve plus per-cohort jitter; `month0` is always 100.
+
+Params: `start_date` (default 365d), `end_date`. Monthly acquisition cohorts
+with retention per month offset. A month the cohort has not yet reached is
+`null`, never zero.
+
 ```json
-[ { "cohort": "Jan 2026", "month0": 100, "month1": 92, "…": 0, "month11": 72 } ]
+[ { "cohort": "YYYY-MM", "cohortSize": 0, "month0": 100, "month1": 0, "month2": null } ]
 ```
 
 ### `GET /api/customers/lifetime-value`
-Params: `start_date`, `end_date` (both optional; filter on `acquisition_date`). Fixed LTV buckets.
+
+Params: `start_date`, `end_date`. Distribution across LTV bands.
+
 ```json
-[ { "range": "$0 - $1K", "count": 0, "percentage": 0 } ]
+[ { "range": "$0-10k", "count": 0, "percentage": 0 } ]
 ```
-Buckets: `$0 - $1K`, `$1K - $5K`, `$5K - $10K`, `$10K - $50K`, `$50K - $100K`, `$100K+`.
 
 ### `GET /api/customers/acquisition`
-Params: `start_date` (default **365d**), `end_date`. Granularity auto-selected by range (≤31d daily, ≤92d weekly, else monthly). Grouped by acquisition channel.
+
+Params: `start_date` (default 365d), `end_date`. New customers per month by
+channel.
+
 ```json
-[ { "date": "YYYY-MM-DD", "channel": "Referral", "count": 0 } ]
+[ { "date": "YYYY-MM-DD", "channel": "", "count": 0 } ]
 ```
 
 ### `GET /api/customers/at-risk`
-Params: `limit` (default 10), `start_date`, `end_date` (optional). Customers with `status = 'at-risk'`, ordered by LTV desc, with generated risk scores.
+
+Params: `limit` (default 10), `start_date`, `end_date`. Shares the churn model
+with `/api/forecasting/churn-risk`, so the two never disagree.
+
 ```json
-[ {
-  "id": 1, "name": "…", "company": "…", "segment": "enterprise",
-  "lifetimeValue": 0, "riskScore": 0.72, "daysSinceActivity": 34,
-  "recommendation": "Executive outreach"
-} ]
+[ { "id": 0, "name": "", "company": "", "segment": "", "lifetimeValue": 0,
+    "riskScore": 0.0, "daysSinceActivity": 0, "recommendation": "" } ]
 ```
-`recommendation` is `"Executive outreach"` when `riskScore > 0.75`, else `"Success check-in"`.
 
 ---
 
 ## Operations — `/api/operations`
 
 ### `GET /api/operations/pipeline`
-Params: `start_date` (30d), `end_date`. Funnel by stage (`lead` → `qualified` → `proposal` → `negotiation` → `closed-won`). Counts/values are the stored per-stage sums scaled by a period- and date-seeded factor. `conversionRate` is stage-over-previous-stage.
+
+Params: `start_date` (30d), `end_date`. Funnel by stage. `conversionRate` is
+`null` for the first stage, which has nothing to convert from.
+
 ```json
-[ { "stage": "Lead", "value": 0, "count": 0, "conversionRate": 100 } ]
+[ { "stage": "Lead", "count": 0, "value": 0, "conversionRate": null } ]
 ```
 
 ### `GET /api/operations/pipeline-kpis`
-Params: `start_date`, `end_date`. `pipelineValue`/`winRate`/`avgDealSize` from the shared `get_pipeline_metrics` helper; `avgCycleTime` (~42 days) and all `*Change` fields are generated.
+
+Params: `start_date` (30d), `end_date`. The `*Change` fields are `null`:
+pipeline rows carry current state rather than history, so a prior-period value
+cannot be reconstructed.
+
 ```json
 {
-  "pipelineValue": 0, "pipelineChange": 0,
-  "avgCycleTime": 42, "cycleTimeChange": 0,
-  "winRate": 0, "winRateChange": 0,
-  "avgDealSize": 0, "dealSizeChange": 0
+  "pipelineValue": 0, "pipelineChange": null,
+  "avgCycleTime": null, "cycleTimeChange": null,
+  "winRate": 0, "winRateChange": null,
+  "avgDealSize": 0, "dealSizeChange": null
 }
 ```
 
 ### `GET /api/operations/sales-performance`
-Params: `start_date` (30d), `end_date`. Real per-rep achieved revenue is computed, then `attainment` is **overwritten** with a curated distribution (top 6 exceed quota, middle 6 near quota, rest below) and `achieved` is back-calculated to match. Returns up to 20 reps, sorted by attainment desc.
+
+Params: `start_date` (30d), `end_date`. `attainment` is `achieved / quota`,
+computed rather than shaped: this endpoint previously overwrote real per-rep
+revenue with a manufactured 145-to-61 distribution.
+
 ```json
-[ { "id": 1, "name": "…", "team": "Enterprise", "region": "Europe",
-    "quota": 0, "achieved": 0, "deals": 0, "attainment": 132.4 } ]
+[ { "id": 0, "name": "", "team": "", "region": "", "quota": 0, "achieved": 0,
+    "attainment": 0, "deals": 0 } ]
 ```
 
 ### `GET /api/operations/conversion-rates`
-No params. Stage-to-stage conversion from stored pipeline counts.
+
+No params. Stage-to-stage conversion across the whole pipeline.
+
 ```json
-[ { "fromStage": "Lead → Qualified", "rate": 0 } ]
+[ { "fromStage": "", "toStage": "", "rate": 0 } ]
 ```
-> Note: the response contains `fromStage` (an arrow label) and `rate` only. The frontend TS type also declares `toStage`, which this endpoint does not send.
 
 ### `GET /api/operations/cycle-time`
-Params: `start_date` (used only to seed randomness). Returns generated average days for four transitions.
+
+Params: `start_date` only. Average days per stage, with the sample size behind
+each average.
+
 ```json
-[ { "stage": "Lead to Qualified", "avgDays": 8 } ]
+[ { "stage": "", "avgDays": 0, "count": 0 } ]
 ```
 
 ### `GET /api/operations/opportunities`
-Params: `stage` (optional filter), `limit` (default 20). Real pipeline rows via `Pipeline.to_dict()`, ordered by amount desc.
+
+Params: `stage` (optional), `limit` (default 20).
+
 ```json
-[ {
-  "id": 1, "opportunityName": "…", "customerId": 1, "customerName": "…",
-  "salesRepId": 1, "salesRepName": "…", "stage": "proposal",
-  "amount": 0, "probability": 55, "expectedCloseDate": "YYYY-MM-DD"
-} ]
+[ { "id": 0, "opportunityName": "", "customerId": 0, "customerName": "",
+    "amount": 0, "probability": 0, "expectedCloseDate": "YYYY-MM-DD", "salesRepId": 0 } ]
 ```
 
 ### `GET /api/operations/deal-size-distribution`
-Params: `start_date` (default **365d**), `end_date`. Completed transactions bucketed by amount. (Not listed in the README.)
+
+Params: `start_date` (default 365d), `end_date`.
+
 ```json
-[ { "bucket": "$0-10K", "count": 0, "value": 0 } ]
+[ { "bucket": "", "count": 0, "value": 0 } ]
 ```
-Buckets: `$0-10K`, `$10-25K`, `$25-50K`, `$50-100K`, `$100-250K`, `$250K+`.
 
 ---
 
 ## Forecasting — `/api/forecasting`
 
+Backed by two models trained on the application's own data. Every figure below
+is measured on a holdout the model never trained on. When a model cannot be fit,
+endpoints report `available: false` rather than returning a number.
+
 ### `GET /api/forecasting/revenue`
-Params: `periods` (default 6), `start_date`, `end_date` (optional). Fits a degree-1 trend (`numpy.polyfit`) to historical monthly revenue, emits the last ~5 actual months then `periods` forecast months (dated to the 1st). Returns `[]` if fewer than 3 months of history exist. On actual months `predicted`/bounds are `null`; on forecast months `actual` is `null` (except the bridge point).
+
+Params: `periods` (default 6, clamped to 1–24), `start_date`, `end_date`.
+Returns history followed by the forecast. The last actual month also carries a
+`predicted` value equal to its actual, so the dashed forecast line begins
+exactly where the solid history line ends. That join point has no interval,
+because it is a measurement rather than a prediction.
+
 ```json
-[ { "date": "YYYY-MM-DD", "actual": 0, "predicted": null, "lowerBound": null, "upperBound": null } ]
+[ { "date": "YYYY-MM-01", "actual": 0, "predicted": null, "lowerBound": null, "upperBound": null } ]
 ```
 
+Bounds derive from holdout RMSE scaled by the square root of the horizon, so
+they widen with distance. `lowerBound` is never negative.
+
 ### `GET /api/forecasting/pipeline`
-Params: `start_date`, `end_date` (optional). Open pipeline weighted by probability, grouped by expected-close month (next 6 months).
+
+Params: `start_date`, `end_date`. Probability-weighted pipeline by month.
+
 ```json
-[ { "month": "Jul 2026", "weighted": 0, "best": 0, "worst": 0 } ]
+[ { "month": "", "weighted": 0, "best": 0, "worst": 0 } ]
 ```
 
 ### `GET /api/forecasting/churn-risk`
-Params: `limit` (default 10), `start_date`, `end_date`. Same shape and helper as `/customers/at-risk`.
+
+Params: `limit` (default 10), `start_date`, `end_date`. Model probabilities,
+descending. Already-churned accounts are excluded. `daysSinceActivity` is the
+real recency from the feature frame.
+
 ```json
-[ { "id": 1, "name": "…", "company": "…", "segment": "…",
-    "lifetimeValue": 0, "riskScore": 0.72, "daysSinceActivity": 34,
-    "recommendation": "Executive outreach" } ]
+[ { "id": 0, "name": "", "company": "", "segment": "", "lifetimeValue": 0,
+    "riskScore": 0.0, "daysSinceActivity": 0, "recommendation": "" } ]
 ```
 
 ### `GET /api/forecasting/kpis`
-Params: `start_date`, `end_date`. `predictedRevenue` and change fields are generated; `atRiskCount` and `modelAccuracy` come from shared helpers.
+
+Params: `start_date`, `end_date`.
+
 ```json
-{
-  "predictedRevenue": 0, "predictedChange": 0,
-  "atRiskCount": 0, "atRiskChange": 0,
-  "modelAccuracy": 0, "accuracyChange": 0,
-  "forecastPeriod": 6
-}
+{ "predictedRevenue": 0, "predictedChange": 0, "atRiskCount": 0,
+  "atRiskChange": null, "modelAccuracy": 0, "accuracyChange": null,
+  "forecastPeriod": 6 }
 ```
 
 ### `GET /api/forecasting/seasonality`
-Params: `start_date`, `end_date`. Monthly seasonality index = month avg / overall avg, with jitter. Returns `[]` if there is no data.
+
+Params: `start_date`, `end_date`. Monthly index against the series mean.
+
 ```json
-[ { "month": "Jan", "index": 1.0, "trend": 0.01 } ]
+[ { "month": "Jan", "index": 1.0, "trend": 0 } ]
 ```
 
 ### `GET /api/forecasting/model-performance`
-Params: `start_date`, `end_date`. **Entirely generated** — there is no trained model. Values come from `get_model_metrics`.
-```json
-{ "accuracy": 93.5, "mape": 5.2, "r2Score": 0.94, "rmse": 32000,
-  "dataPoints": "24 mo", "lastUpdate": "Dec 20", "confidence": 95 }
-```
 
-### `GET /api/forecasting/revenue-at-risk`
-Params: `start_date`, `end_date`. At-risk customers categorized into high/medium/low by risk score (shared helper).
+Ignores date filters: model performance is a property of the fit, not of the
+window being viewed. It used to be varied by filter for appearances.
+
 ```json
 {
-  "highRisk":   { "value": 0, "customers": 0, "label": "High Risk",   "threshold": "65%+ risk" },
-  "mediumRisk": { "value": 0, "customers": 0, "label": "Medium Risk", "threshold": "50-65% risk" },
-  "lowRisk":    { "value": 0, "customers": 0, "label": "Low Risk",    "threshold": "<50% risk" },
-  "total": 0,
-  "totalCustomers": 0
+  "available": true,
+  "accuracy": 0, "mape": 0, "r2Score": 0, "rmse": 0, "dataPoints": "21 mo",
+  "revenue": {
+    "model": "Ridge regression on trend, seasonality, and 2 lags",
+    "validation": "chronological holdout",
+    "mape": 0, "naiveMape": 0, "seasonalNaiveMape": 0, "improvementOverNaive": 0,
+    "rmse": 0, "mae": 0, "r2Score": 0, "trainMonths": 0, "holdoutMonths": 0
+  },
+  "churn": {
+    "model": "Gradient-boosted classifier on RFM and account features",
+    "validation": "stratified holdout",
+    "rocAuc": 0, "accuracy": 0, "precision": 0, "recall": 0, "f1": 0,
+    "averagePrecision": 0, "brierScore": 0, "baseRate": 0,
+    "trainRows": 0, "holdoutRows": 0, "topFeatures": {}
+  }
+}
+```
+
+Note that `r2Score` is negative for the revenue model. That is honest and worth
+understanding: R² measures against the holdout's own mean, and across a short,
+nearly flat holdout window that mean is hard to beat even when absolute error is
+small. MAPE against the naive baseline is the comparison that says whether the
+model earns its keep.
+
+### `GET /api/forecasting/revenue-at-risk`
+
+Params: `start_date`, `end_date`. Lifetime value bucketed by churn probability.
+Buckets sum to the totals.
+
+```json
+{
+  "highRisk":   { "value": 0, "customers": 0, "label": "", "threshold": "" },
+  "mediumRisk": { "value": 0, "customers": 0, "label": "", "threshold": "" },
+  "lowRisk":    { "value": 0, "customers": 0, "label": "", "threshold": "" },
+  "total": 0, "totalCustomers": 0
 }
 ```
