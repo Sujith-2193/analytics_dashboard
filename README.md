@@ -54,6 +54,22 @@ horizon, not a flat percentage band. `/api/forecasting/model-performance`
 returns those exact numbers, and `backend/tests/test_forecasting_api.py`
 asserts the endpoint matches the trained model rather than deriving anything.
 
+## Two conventions this codebase holds to
+
+**Numbers are measured, never generated.** This application used to report model
+accuracy, churn scores, and confidence intervals from `random.uniform()`. All of
+it is now derived from trained models on a holdout, and several tests assert that
+endpoint output matches the model exactly rather than approximately. Where a
+figure cannot be derived, the API returns `null` and the interface renders an
+honest blank instead of a plausible-looking constant.
+
+**Time buckets follow one rule, defined once.** A period the window only partly
+covers is not plotted, because a nine-day month sitting beside twelve complete
+ones reads as a collapse rather than as a month that is not over. That rule lives
+in `backend/app/periods.py` and every time-series endpoint calls it. It exists
+because the same data once trended upward under a 90-day filter and fell off a
+cliff under Year to Date, with bucket size the only difference.
+
 ## About the hosted demo
 
 **This application runs against a live PostgreSQL database.** That is the real
