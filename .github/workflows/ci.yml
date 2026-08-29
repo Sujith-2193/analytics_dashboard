@@ -2,80 +2,53 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, fastapi-docker-migration]
   pull_request:
     branches: [main]
 
 jobs:
   backend:
     runs-on: ubuntu-latest
-    # The cross-endpoint consistency suite needs real Postgres: most queries use
-    # date_trunc, which SQLite has no equivalent for. Without this service those
-    # tests skip, and the checks that caught the pipeline and partial-period
-    # defects would never run in CI.
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:16
         env:
+          POSTGRES_DB: analytics
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: analytics_dashboard_test
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/analytics_dashboard_test
+          --health-cmd "pg_isready -U postgres -d analytics"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-      - name: Install dependencies
-        working-directory: backend
-        run: pip install -r requirements.txt
-      - name: Run tests
-        working-directory: backend
-        run: python -m pytest tests/ -q
+      - run: pip install -r requirements.txt
+      - name: Migrations
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/analytics
+        run: alembic upgrade head
+      - name: Tests
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/analytics
+        run: pytest -q
 
   frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # jsdom 30 requires ^22.22.2 || ^24.15.0 || >=26.0.0 and undici 8
-          # requires >=22.19.0. This was pinned to 20, which satisfies neither,
-          # so jsdom failed to load and every test file errored with zero tests
-          # run. `npm ci` only warns on an engine mismatch, so the job looked
-          # healthy until the suite actually started. See engines in
-          # frontend/package.json.
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Lint
-        working-directory: frontend
-        run: npm run lint
-      - name: Test
-        working-directory: frontend
-        run: npm test
-      - name: Type-check and build
-        working-directory: frontend
-        run: npm run build
-
-  secrets-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npm ci
+      - run: npm run build

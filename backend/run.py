@@ -1,7 +1,12 @@
-import os
-from app import create_app
+"""Local development entry point for the FastAPI application."""
 
-app = create_app(os.getenv('FLASK_ENV', 'development'))
+import uvicorn
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=int(__import__("os").environ.get("PORT", "8000")),
+        reload=True,
+    )
