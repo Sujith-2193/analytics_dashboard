@@ -23,8 +23,9 @@ async def lifespan(app: FastAPI):
     logger.info("Analytics Dashboard API stopped")
 
 app = FastAPI(title="Analytics Dashboard API", version="2.0.0", lifespan=lifespan)
+origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(RequestIdMiddleware)
-app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["*"])
 app.add_exception_handler(SQLAlchemyError, sqlalchemy_error_handler)
 app.add_exception_handler(Exception, unhandled_error_handler)
 app.include_router(api_router)
