@@ -1,6 +1,5 @@
-"""Initial analytics schema."""
+"""Initial analytics schema baseline."""
 from alembic import op
-import sqlalchemy as sa
 
 revision = "0001_initial"
 down_revision = None
@@ -9,9 +8,10 @@ depends_on = None
 
 
 def upgrade():
-    # Baseline revision for the existing schema. Fresh installs are bootstrapped
-    # by the application's model metadata; future schema changes use Alembic.
+    # Baseline revision for the schema already managed by the application's
+    # model bootstrap. Future schema changes should be real Alembic revisions.
     pass
+
 
 def downgrade():
     pass
