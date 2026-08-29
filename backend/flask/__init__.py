@@ -6,8 +6,7 @@ the endpoint implementation is migrated incrementally.
 """
 
 from contextlib import contextmanager
-from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
