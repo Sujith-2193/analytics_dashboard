@@ -18,5 +18,16 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         finally:
             request_id_ctx.reset(token)
 
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id_ctx.get()
+        return True
+
 def configure_logging():
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s request_id=%(request_id)s", stream=sys.stdout)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(RequestIdFilter())
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s request_id=%(request_id)s %(message)s"))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
