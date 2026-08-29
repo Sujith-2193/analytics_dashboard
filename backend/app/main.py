@@ -1,17 +1,28 @@
 import logging
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from app.db import engine
+
 from app.api_router import api_router
+from app.db import engine
 from app.errors import sqlalchemy_error_handler, unhandled_error_handler
 from app.logging_config import RequestIdMiddleware, configure_logging
 
 configure_logging()
 logger = logging.getLogger(__name__)
-app = FastAPI(title="Analytics Dashboard API", version="2.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting Analytics Dashboard API")
+    yield
+    engine.dispose()
+    logger.info("Analytics Dashboard API stopped")
+
+app = FastAPI(title="Analytics Dashboard API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_exception_handler(SQLAlchemyError, sqlalchemy_error_handler)
