@@ -43,12 +43,7 @@ class Database:
         self.remove()
         if self.engine is not None:
             self.engine.dispose()
-        self.engine = create_engine(
-            url,
-            pool_pre_ping=True,
-            pool_recycle=300,
-            future=True,
-        )
+        self.engine = create_engine(url, pool_pre_ping=True, pool_recycle=300, future=True)
         factory = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, expire_on_commit=False)
         self.session = scoped_session(factory)
 
@@ -90,7 +85,7 @@ def _register_blueprint(app: FastAPI, blueprint: Any) -> None:
             path,
             endpoint,
             methods=route.methods,
-            name=route.endpoint.__name__,
+            name=f"{blueprint.name}_{route.endpoint.__name__}",
         )
 
 
@@ -113,14 +108,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    origins = [
-        origin.strip()
-        for origin in os.getenv(
-            "CORS_ORIGINS",
-            "http://localhost:3000,http://localhost:5173",
-        ).split(",")
-        if origin.strip()
-    ]
+    origins = [origin.strip() for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    ).split(",") if origin.strip()]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -130,7 +120,6 @@ def create_app() -> FastAPI:
     )
 
     from .routes import dashboard, revenue, customers, operations, forecasting
-
     for module in (dashboard, revenue, customers, operations, forecasting):
         _register_blueprint(app, module.bp)
 
@@ -140,7 +129,6 @@ def create_app() -> FastAPI:
         try:
             from datetime import date
             from .models import Customer, Pipeline, Transaction
-
             counts = {
                 "customers": db.session.query(Customer).count(),
                 "transactions": db.session.query(Transaction).count(),
