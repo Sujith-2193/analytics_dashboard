@@ -1,16 +1,22 @@
-"""Temporary import-compatibility shim for the legacy route modules.
+"""Import-compatibility shim used during the FastAPI migration.
 
 This is NOT Flask. The backend is served by FastAPI; the shim only preserves
-`from flask import Blueprint, request, Flask` imports while the existing route
-modules are migrated incrementally.
+small Flask symbols used by legacy analytics modules and tests.
 """
 
 from contextlib import contextmanager
 
-from fastapi.testclient import TestClient
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.fastapi_compat import Blueprint, request
+
+
+# The legacy seed script only uses truthiness to decide whether an application
+# context already exists. FastAPI's application object is not a Flask context,
+# so a truthy sentinel keeps the standalone seed path on the shared SQLAlchemy
+# engine configured from DATABASE_URL.
+current_app = object()
 
 
 class Flask(FastAPI):
@@ -35,4 +41,4 @@ class Flask(FastAPI):
         return TestClient(self)
 
 
-__all__ = ["Blueprint", "Flask", "request"]
+__all__ = ["Blueprint", "Flask", "current_app", "request"]
