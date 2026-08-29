@@ -36,8 +36,13 @@ class Database:
         self.configure(os.getenv("DATABASE_URL", "postgresql://localhost/analytics_dashboard"))
 
     def configure(self, url: str) -> None:
+        if not url:
+            raise RuntimeError("DATABASE_URL must not be empty")
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
+        self.remove()
+        if self.engine is not None:
+            self.engine.dispose()
         self.engine = create_engine(
             url,
             pool_pre_ping=True,
@@ -48,8 +53,10 @@ class Database:
         self.session = scoped_session(factory)
 
     def init_app(self, app: Any) -> None:
-        """Compatibility hook for older callers; FastAPI uses the shared engine."""
-        return None
+        """Compatibility hook for legacy tests; reads their configured DB URL."""
+        url = app.config.get("SQLALCHEMY_DATABASE_URI") if hasattr(app, "config") else None
+        if url:
+            self.configure(url)
 
     def create_all(self) -> None:
         self.Model.metadata.create_all(self.engine)
@@ -75,6 +82,8 @@ def _register_blueprint(app: FastAPI, blueprint: Any) -> None:
             try:
                 return _route()
             finally:
+                from .fastapi_compat import _request_ctx
+                _request_ctx.reset(token)
                 db.remove()
 
         app.add_api_route(
@@ -90,8 +99,6 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Import models before create_all so SQLAlchemy knows every table and
-        # relationship. Seeding remains an explicit operation via reseed.py.
         from . import models  # noqa: F401
         db.create_all()
         yield
@@ -150,7 +157,7 @@ def create_app() -> FastAPI:
             if not seeded:
                 payload["status"] = "degraded"
                 payload["hint"] = "Database is empty. Run: python reseed.py"
-        except Exception as exc:  # noqa: BLE001 - health endpoint surfaces readiness failures
+        except Exception as exc:  # noqa: BLE001
             db.session.rollback()
             payload["status"] = "degraded"
             payload["data"] = {"error": str(exc)}
