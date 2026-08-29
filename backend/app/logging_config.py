@@ -19,4 +19,4 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             request_id_ctx.reset(token)
 
 def configure_logging():
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s request_id=%(message)s", stream=sys.stdout)
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s request_id=%(request_id)s", stream=sys.stdout)
