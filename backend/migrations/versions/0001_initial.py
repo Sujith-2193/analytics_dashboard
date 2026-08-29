@@ -9,10 +9,9 @@ depends_on = None
 
 
 def upgrade():
-    # The application models create tables when bootstrapping an empty database.
-    # This baseline migration is intentionally empty for existing deployments.
+    # Baseline revision for the existing schema. Fresh installs are bootstrapped
+    # by the application's model metadata; future schema changes use Alembic.
     pass
-
 
 def downgrade():
     pass

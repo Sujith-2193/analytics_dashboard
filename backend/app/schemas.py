@@ -1,5 +1,5 @@
-from pydantic import BaseModel, ConfigDict, Field
 from typing import Any
+from pydantic import BaseModel, ConfigDict, Field
 
 class HealthResponse(BaseModel):
     status: str
@@ -13,4 +13,4 @@ class Pagination(BaseModel):
 
 class GenericPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
-    data: dict[str, Any] = {}
+    data: dict[str, Any] = Field(default_factory=dict)
