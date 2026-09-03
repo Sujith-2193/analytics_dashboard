@@ -1,7 +1,7 @@
 <!-- docgen:auto -->
 # Dependencies
 
-_Auto-generated 2026-08-09 by `docgen` from the repo's manifests. Mechanical list of declared dependencies — see the manifests themselves for the source of truth._
+_Updated for the FastAPI migration. Mechanical list of declared dependencies — see the manifests themselves for the source of truth._
 
 ## Node
 
@@ -42,15 +42,15 @@ _Auto-generated 2026-08-09 by `docgen` from the repo's manifests. Mechanical lis
 
 | Package | Constraint | Manifest |
 |---------|-----------|----------|
-| `faker` | ==22.0.0 | `backend/requirements.txt` |
-| `flask` | ==3.0.0 | `backend/requirements.txt` |
-| `flask-cors` | ==4.0.0 | `backend/requirements.txt` |
-| `flask-sqlalchemy` | ==3.1.1 | `backend/requirements.txt` |
-| `gunicorn` | ==21.2.0 | `backend/requirements.txt` |
-| `numpy` | ==1.26.4 | `backend/requirements.txt` |
-| `pandas` | ==2.2.3 | `backend/requirements.txt` |
-| `psycopg2-binary` | ==2.9.9 | `backend/requirements.txt` |
-| `pytest` | ==8.0.0 | `backend/requirements.txt` |
-| `python-dotenv` | ==1.0.0 | `backend/requirements.txt` |
-| `scikit-learn` | ==1.3.2 | `backend/requirements.txt` |
-| `sqlalchemy` | ==2.0.23 | `backend/requirements.txt` |
+| `fastapi` | >=0.115,<1.0 | `backend/requirements.txt` |
+| `uvicorn[standard]` | >=0.34,<1.0 | `backend/requirements.txt` |
+| `httpx` | >=0.28,<1.0 | `backend/requirements.txt` |
+| `sqlalchemy` | >=2.0,<3.0 | `backend/requirements.txt` |
+| `psycopg[binary]` | >=3.2,<4.0 | `backend/requirements.txt` |
+| `python-dotenv` | >=1.0,<2.0 | `backend/requirements.txt` |
+| `gunicorn` | >=23.0,<24.0 | `backend/requirements.txt` |
+| `faker` | >=22.0,<40.0 | `backend/requirements.txt` |
+| `numpy` | >=2.1,<3.0 | `backend/requirements.txt` |
+| `pandas` | >=2.2,<3.0 | `backend/requirements.txt` |
+| `scikit-learn` | >=1.6,<2.0 | `backend/requirements.txt` |
+| `pytest` | >=8.0,<9.0 | `backend/requirements.txt` |

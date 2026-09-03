@@ -186,7 +186,7 @@ still run, so a fresh clone is not blocked.
 
 ## 9. Same-origin single service
 
-**Decision.** The production build places the compiled frontend where Flask can
+**Decision.** The production build places the compiled frontend where FastAPI can
 serve it, so the API and the SPA share an origin.
 
 **Why.** It removes CORS and proxy configuration from production entirely, and

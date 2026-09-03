@@ -13,4 +13,4 @@ COPY backend/ .
 EXPOSE $PORT
 
 # Start the app
-CMD gunicorn run:app --bind 0.0.0.0:$PORT --workers 2
+CMD uvicorn run:app --host 0.0.0.0 --port ${PORT:-5001}

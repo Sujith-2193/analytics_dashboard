@@ -23,6 +23,7 @@ from sklearn.preprocessing import StandardScaler
 MIN_MONTHS = 12
 HOLDOUT_MONTHS = 6
 N_LAGS = 2
+RIDGE_ALPHA = 10.0
 
 
 @dataclass
@@ -111,7 +112,7 @@ def train(frame: pd.DataFrame, horizon: int = 6) -> Forecast:
     X_train, X_test = X[:-holdout], X[-holdout:]
     y_train, y_test = y[:-holdout], y[-holdout:]
 
-    model = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+    model = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=RIDGE_ALPHA))])
     model.fit(X_train, y_train)
     pred = model.predict(X_test)
 
@@ -147,7 +148,7 @@ def train(frame: pd.DataFrame, horizon: int = 6) -> Forecast:
 
     # Refit on the full history before forecasting forward. The holdout existed
     # to measure error honestly, not to be thrown away.
-    final = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+    final = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=RIDGE_ALPHA))])
     final.fit(X, y)
 
     # Recursive multi-step forecast: each prediction feeds the next month's lags.

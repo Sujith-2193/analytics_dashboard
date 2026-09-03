@@ -5,10 +5,10 @@ import {
   Users,
   Settings2,
   TrendingUp,
+  Activity,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { useState } from 'react';
 import clsx from 'clsx';
 import { IS_STATIC, getManifest } from '../../services/staticData';
 
@@ -26,25 +26,35 @@ const navigation: NavItem[] = [
   { name: 'Forecasting', href: '/forecasting', icon: TrendingUp },
 ];
 
-export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+interface SidebarProps {
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+}
 
+export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
   return (
     <aside
       className={clsx(
-        'fixed left-0 top-0 z-40 h-screen bg-gray-900 border-r border-gray-800 transition-all duration-300',
+        'fixed left-0 top-0 z-40 h-screen border-r border-white/10 bg-zinc-950/90 text-white shadow-2xl shadow-black/20 backdrop-blur-xl transition-all duration-300',
         collapsed ? 'w-16' : 'w-64'
       )}
     >
-      {/* Logo - matches main header height h-12 */}
-      <div className="flex items-center justify-between px-4 h-12 border-b border-gray-800">
+      <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
         {!collapsed && (
-          <span className="text-lg font-bold text-white">Analytics</span>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg bg-emerald-400 text-zinc-950 shadow-lg shadow-emerald-500/20">
+              <Activity className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="block truncate text-sm font-semibold">SignalFlow</span>
+              <span className="block truncate text-[11px] text-zinc-400">Analytics cockpit</span>
+            </div>
+          </div>
         )}
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => onCollapsedChange(!collapsed)}
           className={clsx(
-            'p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors',
+            'rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white',
             collapsed && 'mx-auto'
           )}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -57,18 +67,17 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex flex-col gap-0.5 p-2">
+      <nav className="flex flex-col gap-1 p-2">
         {navigation.map((item) => (
           <NavLink
             key={item.name}
             to={item.href}
             className={({ isActive }) =>
               clsx(
-                'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
+                'group relative flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-200',
                 isActive
-                  ? 'bg-primary-600 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  ? 'bg-white text-zinc-950 shadow-lg shadow-emerald-500/10'
+                  : 'text-zinc-400 hover:bg-white/10 hover:text-white'
               )
             }
           >
@@ -80,16 +89,16 @@ export function Sidebar() {
 
       {/* Footer */}
       {!collapsed && (
-        <div className="absolute bottom-0 left-0 right-0 px-3 py-2 border-t border-gray-800">
-          <div className="text-xs text-gray-500">
-            <p>Enterprise Analytics v1.0.0</p>
+        <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 px-3 py-3">
+          <div className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-zinc-400">
+            <p className="font-medium text-zinc-200">FastAPI intelligence layer</p>
             {/*
               The demo's data is frozen at the date it was generated, and its
               date presets resolve against that date. Saying so is the honest
               thing: without it the dashboard silently claims to be current.
             */}
             {IS_STATIC && getManifest() && (
-              <p className="mt-1 text-gray-600">
+              <p className="mt-1 text-zinc-500">
                 Static demo &middot; data as of {getManifest()!.snapshotDate}
               </p>
             )}

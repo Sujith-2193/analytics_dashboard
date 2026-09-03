@@ -8,7 +8,7 @@
  *
  * API Base URL:
  * - Development: Uses VITE_API_URL env var or defaults to '/api'
- * - Production: Relative '/api' path (same-origin with Flask backend)
+ * - Production: Relative '/api' path (same-origin with FastAPI backend)
  * - Static demo: VITE_STATIC_DATA=true reads pre-generated JSON instead of the
  *   network. See services/staticData.ts. Every function below is unchanged in
  *   that mode; only the transport differs.

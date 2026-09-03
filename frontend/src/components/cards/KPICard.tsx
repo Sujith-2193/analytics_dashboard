@@ -88,17 +88,17 @@ export function KPICard({
     return (
       <div
         className={clsx(
-          'bg-gray-900 rounded-lg border border-gray-800 px-3 py-2',
+          'rounded-lg border border-black/10 bg-white/80 px-3 py-2 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/[0.04]',
           className
         )}
       >
         <div className="flex items-center gap-3">
-          <div className="h-4 w-4 bg-gray-800 rounded animate-pulse flex-shrink-0" />
+          <div className="h-4 w-4 flex-shrink-0 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
           <div className="flex-1 min-w-0">
-            <div className="h-3 w-16 bg-gray-800 rounded animate-pulse mb-1" />
-            <div className="h-5 w-20 bg-gray-800 rounded animate-pulse" />
+            <div className="mb-1 h-3 w-16 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
+            <div className="h-5 w-20 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
           </div>
-          <div className="h-4 w-12 bg-gray-800 rounded animate-pulse" />
+          <div className="h-4 w-12 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
         </div>
       </div>
     );
@@ -107,19 +107,19 @@ export function KPICard({
   return (
     <div
       className={clsx(
-        'bg-gray-900 rounded-lg border border-gray-800 px-3 py-2 card-hover',
+        'surface-card rounded-lg px-3 py-2 card-hover',
         className
       )}
     >
       <div className="flex items-center gap-3">
         {icon && (
-          <div className="p-1.5 bg-primary-500/10 rounded-md text-primary-500 flex-shrink-0">
+          <div className="flex-shrink-0 rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 dark:text-emerald-300">
             {icon}
           </div>
         )}
         <div className="flex-1">
-          <span className="text-xs font-medium text-gray-400 block">{label}</span>
-          <p className="text-lg font-bold text-white tabular-nums">
+          <span className="block text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</span>
+          <p className="text-lg font-bold tabular-nums text-zinc-950 dark:text-white">
             {formattedValue}
           </p>
         </div>
@@ -149,7 +149,7 @@ export function KPIGrid({ children, className }: KPIGridProps) {
   return (
     <div
       className={clsx(
-        'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2',
+        'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2',
         className
       )}
     >

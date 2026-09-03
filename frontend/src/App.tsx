@@ -1,5 +1,5 @@
 /**
- * Analytics Dashboard - Main Application Entry Point
+ * SignalFlow Analytics - Main Application Entry Point
  *
  * This is the root component that sets up the application infrastructure:
  * - React Query for server state management and data fetching

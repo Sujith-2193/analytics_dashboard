@@ -3,7 +3,7 @@
 ## Requirements
 
 - **Python 3.11+**
-- **Node 20+**
+- **Node 22.22+**
 - **PostgreSQL 15+** — required, not optional. Most time-series queries use
   `date_trunc`, which SQLite has no equivalent for.
 
@@ -13,7 +13,7 @@
 docker compose up
 ```
 
-Brings up PostgreSQL and the Flask service. Seed it once the database is
+Brings up PostgreSQL and the FastAPI service. Seed it once the database is
 accepting connections:
 
 ```bash
@@ -50,7 +50,7 @@ npm ci
 npm run dev                           # http://localhost:5173
 ```
 
-The dev server proxies `/api` to Flask on 5001, so both halves share an origin
+The dev server proxies `/api` to FastAPI on 5001, so both halves share an origin
 and no CORS configuration is needed locally.
 
 ## Verifying the install
@@ -68,8 +68,8 @@ deployment when you are staring at a blank dashboard.
 ## Tests
 
 ```bash
-cd backend  && python -m pytest -q              # 116 tests
-cd frontend && npm run lint && npm test         # 184 tests
+cd backend  && python -m pytest -q              # unit tests, Postgres tests skip without TEST_DATABASE_URL
+cd frontend && npm run lint && npm test         # frontend tests
 ```
 
 The cross-endpoint consistency suite needs PostgreSQL and skips without it:
@@ -90,8 +90,8 @@ destroys the data in it and every test still passes.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/analytics_dashboard` | Connection string. `postgres://` is rewritten to `postgresql://` for SQLAlchemy 2. |
-| `FLASK_ENV` | `development` | Selects the config class. |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/analytics_dashboard` | Connection string. `postgres://` and `postgresql://` are loaded through the `psycopg` driver. |
+| `APP_ENV` | `development` | Selects the config class. |
 | `SECRET_KEY` | dev placeholder | Set a real value in production. |
 | `TEST_DATABASE_URL` | `...analytics_dashboard_test` | Tests only. Must end in `_test`. |
 
@@ -110,7 +110,7 @@ Copy `.env.example` to `.env` as a starting point. `.env` is gitignored.
 cd frontend && npm run build          # emits dist/
 ```
 
-Copy `dist/` to `backend/static/` and Flask serves it same-origin with the API,
+Copy `dist/` to `backend/static/` and FastAPI serves it same-origin with the API,
 with SPA fallback for client routes. That directory is gitignored: it is build
 output, and tracking it meant the committed bundle drifted out of sync with the
 source that produced it.

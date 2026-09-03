@@ -1,7 +1,7 @@
 /**
  * Static data adapter for the public demo.
  *
- * The application is a normal Flask + PostgreSQL service and still runs that
+ * The application is a normal FastAPI + PostgreSQL service and still runs that
  * way. The hosted demo is a build artifact of it: `backend/scripts/snapshot.py`
  * runs the real pipeline against a real database, trains the real models, and
  * freezes every API response to JSON. This module serves those files in place

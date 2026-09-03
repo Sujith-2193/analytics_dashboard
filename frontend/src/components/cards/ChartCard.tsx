@@ -32,16 +32,16 @@ export function ChartCard({
   return (
     <div
       className={clsx(
-        'bg-gray-900 rounded-lg border border-gray-800 flex flex-col h-full overflow-hidden',
+        'surface-card flex h-full flex-col overflow-hidden rounded-lg',
         className
       )}
     >
       {/* Header - fixed height */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-black/10 px-3 py-2 dark:border-white/10">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-white">{title}</h3>
+          <h3 className="text-sm font-semibold text-zinc-950 dark:text-white">{title}</h3>
           {subtitle && (
-            <p className="text-xs text-gray-500">· {subtitle}</p>
+            <p className="text-xs text-zinc-500">· {subtitle}</p>
           )}
         </div>
         {actions && <div className="flex items-center gap-1">{actions}</div>}
@@ -102,17 +102,17 @@ export function StatCard({
   return (
     <div
       className={clsx(
-        'bg-gray-900 rounded-lg border border-gray-800 px-3 py-2',
+        'surface-card rounded-lg px-3 py-2',
         className
       )}
     >
       <div className="flex items-center gap-2">
         {icon && (
-          <div className="p-1.5 bg-gray-800 rounded-md text-gray-400 flex-shrink-0">{icon}</div>
+          <div className="flex-shrink-0 rounded-md bg-zinc-100 p-1.5 text-zinc-500 dark:bg-white/10 dark:text-zinc-300">{icon}</div>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-xs text-gray-400">{title}</p>
-          <p className="text-lg font-bold text-white tabular-nums">{value}</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{title}</p>
+          <p className="text-lg font-bold tabular-nums text-zinc-950 dark:text-white">{value}</p>
         </div>
         {trend && (
           <span className={clsx('text-xs font-medium flex-shrink-0', trendColor)}>

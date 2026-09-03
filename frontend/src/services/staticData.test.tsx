@@ -136,11 +136,16 @@ describe('the frozen clock', () => {
   });
 
   it.runIf(HAS_SNAPSHOT)('parses the date locally so no timezone shifts it', () => {
-    // `new Date('2026-08-09')` is UTC midnight, which is the 8th in any
-    // western zone. That would shift every preset by a day and miss the
-    // snapshot wholesale, and only for users west of Greenwich.
+    // `new Date('2026-08-09')` is UTC midnight, which can shift the local
+    // calendar date in either direction depending on the machine timezone.
     const manifest = JSON.parse(readFileSync(join(DATA_DIR, 'manifest.json'), 'utf8'));
-    expect(mod.today().toISOString().slice(0, 10) >= manifest.snapshotDate).toBe(true);
+    const [year, month, day] = manifest.snapshotDate.split('-').map(Number);
+    const today = mod.today();
+    expect([today.getFullYear(), today.getMonth() + 1, today.getDate()]).toEqual([
+      year,
+      month,
+      day,
+    ]);
   });
 
   it.runIf(HAS_SNAPSHOT)('resolves presets to exactly the windows the snapshot holds', () => {

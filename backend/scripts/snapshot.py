@@ -3,7 +3,7 @@
 
 Why this exists
 ---------------
-The application is a normal Flask + PostgreSQL service and still runs that way;
+The application is a normal FastAPI + PostgreSQL service and still runs that way;
 see the README. The hosted demo is a *build artifact* of it. Serving the demo
 from a live database would mean paying for Postgres, waiting through a cold
 start while two models train, and running a cron to stop the seeded window

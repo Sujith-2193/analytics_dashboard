@@ -1,11 +1,11 @@
 # Architecture
 
-A Flask REST API over PostgreSQL, a React SPA that consumes it, and two
+A FastAPI REST API over PostgreSQL, a React SPA that consumes it, and two
 scikit-learn models trained on the application's own data. The hosted demo is a
 static build of the same application; see the end of this document.
 
 ```
-React 19 SPA  ──fetch──▶  Flask /api/*  ──SQLAlchemy──▶  PostgreSQL
+React 19 SPA  ──fetch──▶  FastAPI /api/*  ──SQLAlchemy──▶  PostgreSQL
      │                        │
  TanStack Query          app/ml/registry
  (server cache)          (lazy-trained models)
@@ -17,11 +17,12 @@ React 19 SPA  ──fetch──▶  Flask /api/*  ──SQLAlchemy──▶  Pos
 
 ```
 backend/app/
-  __init__.py      application factory, /api/health, static serving
+  __init__.py      FastAPI factory, /api/health, static serving
+  fastapi_compat.py router/request compatibility and SQLAlchemy session wrapper
   config.py        per-environment config
   periods.py       the time-bucketing rule, shared by every series endpoint
   models/          SQLAlchemy models, one per file
-  routes/          five blueprints, one per domain
+  routes/          five routers, one per domain
   ml/
     features.py    RFM and monthly-revenue feature frames
     churn.py       gradient-boosted classifier
@@ -32,7 +33,7 @@ backend/app/
 ### Application factory
 
 `create_app(config_name)` initialises SQLAlchemy, opens CORS on `/api/*`,
-registers the five blueprints, and calls `db.create_all()`. Creating tables is
+registers the five FastAPI routers, and calls `db.create_all()`. Creating tables is
 idempotent and safe. Populating them is neither, and does not happen here.
 
 The factory previously auto-reseeded when data looked stale. That recursed
@@ -40,7 +41,7 @@ infinitely, because `seed_database()` calls `create_app()`, which reached the
 same check and called `seed_database()` again, terminating only by exhausting
 the database's connections. See `DECISIONS.md` entry 5.
 
-### Route blueprints
+### Route routers
 
 Five, each mounted under its own prefix: `dashboard`, `revenue`, `customers`,
 `operations`, `forecasting`. Handlers query through SQLAlchemy, convert
@@ -131,7 +132,7 @@ from the row before insert so no model can read the label's cause back out.
 The application runs against live PostgreSQL. The hosted demo is a build
 artifact of it.
 
-`backend/scripts/snapshot.py` boots the real Flask app, trains both models,
+`backend/scripts/snapshot.py` boots the real FastAPI app, trains both models,
 walks every endpoint the UI calls under all five date presets, and writes the
 responses to `frontend/public/data/`. With `VITE_STATIC_DATA=true`,
 `fetchApi` resolves those files instead of the network.

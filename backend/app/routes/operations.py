@@ -1,4 +1,4 @@
-from flask import Blueprint, request
+from app.fastapi_compat import Blueprint, request
 from sqlalchemy import func
 from datetime import datetime, timedelta
 from app import db

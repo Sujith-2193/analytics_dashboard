@@ -1,90 +1,66 @@
-"""
-Analytics Dashboard - Flask Application Factory
-
-This module contains the Flask application factory that creates and configures
-the web application. It follows the Flask application factory pattern to support
-multiple configurations (development, production, testing).
-
-Architecture Overview:
-- Flask backend serves both the REST API and static frontend assets
-- SQLAlchemy ORM for database operations (PostgreSQL in production)
-- CORS enabled for API endpoints to support frontend development
-- Blueprints organize routes by domain (dashboard, revenue, customers, etc.)
-
-Key Components:
-- /api/* routes: RESTful API endpoints for dashboard data
-- Static file serving: Built React frontend served in production
-- Database: Auto-creates tables on startup if they don't exist
-"""
+"""FastAPI application factory for the independently maintained dashboard."""
 
 import os
-from flask import Flask, send_from_directory
-from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.middleware.proxy_fix import ProxyFix
+from contextlib import asynccontextmanager
 
 from .config import config
+from .fastapi_compat import Database
 
-# Global SQLAlchemy instance - initialized with app in create_app()
-db = SQLAlchemy()
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+
+db = Database()
 
 
-def create_app(config_name: str = None) -> Flask:
-    """
-    Application factory for creating Flask app instances.
-
-    This factory pattern allows creating multiple app instances with different
-    configurations, which is essential for testing and running different
-    environments (dev/staging/production).
-
-    Args:
-        config_name: Configuration to use ('development', 'production', 'testing').
-                    Defaults to FLASK_ENV environment variable or 'development'.
-
-    Returns:
-        Configured Flask application instance ready to serve requests.
-
-    Example:
-        app = create_app('development')
-        app.run(host='0.0.0.0', port=5001)
-    """
+def create_app(config_name: str = None) -> FastAPI:
     if config_name is None:
-        config_name = os.getenv('FLASK_ENV', 'development')
+        config_name = os.getenv('APP_ENV') or os.getenv('FLASK_ENV', 'development')
 
-    # Check if we have a built frontend to serve
     static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static')
     has_static = os.path.exists(static_folder)
+    settings = config[config_name]
 
-    app = Flask(__name__, static_folder=static_folder if has_static else None)
-    app.config.from_object(config[config_name])
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        db.init_app(app)
+        with db.app_context():
+            try:
+                db.create_all()
+            except Exception:
+                pass
+        yield
+        db.session.remove()
 
-    # Trust proxy headers (Railway, Heroku, etc.) for proper HTTPS handling
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+    app = FastAPI(
+        title="SignalFlow Analytics API",
+        version="2.0.0",
+        description="FastAPI, SQLAlchemy, PostgreSQL, and scikit-learn analytics service.",
+        lifespan=lifespan,
+    )
+    app.state.config_name = config_name
+    app.state.database_url = settings.SQLALCHEMY_DATABASE_URI
+    app.config = {"SQLALCHEMY_DATABASE_URI": settings.SQLALCHEMY_DATABASE_URI}
+    app.app_context = db.app_context
 
-    # Initialize extensions
     db.init_app(app)
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-    # Register blueprints
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     from .routes import dashboard, revenue, customers, operations, forecasting
 
-    app.register_blueprint(dashboard.bp)
-    app.register_blueprint(revenue.bp)
-    app.register_blueprint(customers.bp)
-    app.register_blueprint(operations.bp)
-    app.register_blueprint(forecasting.bp)
+    for module in (dashboard, revenue, customers, operations, forecasting):
+        app.include_router(module.bp.router)
 
-    # Health check endpoint
-    @app.route('/api/health')
+    @app.get('/api/health')
     def health():
-        """Liveness plus data readiness.
-
-        Reporting row counts and data freshness here is deliberate. Every
-        endpoint degrades gracefully on an empty database and returns 200 with
-        empty results, which is correct behaviour but indistinguishable from a
-        broken deployment when you are looking at a blank dashboard. This says
-        which one it is in a single request.
-        """
         payload = {'status': 'healthy', 'environment': config_name}
 
         try:
@@ -115,40 +91,20 @@ def create_app(config_name: str = None) -> Flask:
 
         return payload
 
-    # Seeding is a deliberate, local operation. It used to be exposed as an
-    # unauthenticated GET at /api/seed-database, which meant anyone who found
-    # the URL could wipe and regenerate the entire dataset, and a stack trace
-    # came back on failure. Use `python reseed.py` instead.
-    #
-    # If you ever need it over HTTP, gate it behind a token and make it POST.
-
-    # Serve frontend static files in production
     if has_static:
-        @app.route('/')
+        app.mount('/assets', StaticFiles(directory=os.path.join(static_folder, 'assets')), name='assets')
+
+        @app.get('/')
         def serve_index():
-            return send_from_directory(static_folder, 'index.html')
+            return FileResponse(os.path.join(static_folder, 'index.html'))
 
-        @app.route('/<path:path>')
-        def serve_static(path):
-            # Try to serve the file, fall back to index.html for SPA routing
-            if os.path.exists(os.path.join(static_folder, path)):
-                return send_from_directory(static_folder, path)
-            return send_from_directory(static_folder, 'index.html')
+        @app.get('/{path:path}', include_in_schema=False)
+        def serve_static(path: str):
+            candidate = os.path.join(static_folder, path)
+            if os.path.exists(candidate) and os.path.isfile(candidate):
+                return FileResponse(candidate)
+            return FileResponse(os.path.join(static_folder, 'index.html'))
 
-    # Ensure tables exist. Creating them is safe and idempotent; populating them
-    # is not, and does not belong in an application factory.
-    #
-    # This block used to also auto-reseed whenever the newest transaction was
-    # more than a week old, by calling seed_database(). That produced infinite
-    # recursion: seed_database() itself calls create_app(), which reached this
-    # block, found the database still empty, and called seed_database() again.
-    # Each level opened its own SQLAlchemy engine, so the recursion terminated
-    # only by exhausting the server's connections — meaning the app could never
-    # cold-start against an empty database, and a shared Postgres instance would
-    # be knocked over in the attempt. The bare `except Exception: pass` around
-    # it hid the failure completely.
-    #
-    # Seeding is now a deliberate operation: `python reseed.py`.
     with app.app_context():
         try:
             db.create_all()

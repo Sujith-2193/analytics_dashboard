@@ -10,14 +10,15 @@ from __future__ import annotations
 import os
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
-from flask import Flask
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import db  # noqa: E402
+from app import create_app, db  # noqa: E402
 from app.models import Customer, Pipeline, Product, SalesRep, Transaction  # noqa: E402
 
 # Small enough to seed quickly, large enough for a stratified split to be
@@ -28,11 +29,14 @@ TEST_TRANSACTIONS = 14000
 
 @pytest.fixture(scope="session")
 def app(tmp_path_factory):
-    db_path = tmp_path_factory.mktemp("db") / "test.db"
-    application = Flask(__name__)
+    db_dir = Path(__file__).resolve().parents[1] / ".test-data"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / "test.db"
+    if db_path.exists():
+        db_path.unlink()
+    application = create_app("testing")
+    application.state.database_url = f"sqlite:///{db_path}"
     application.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
-    application.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    application.config["TESTING"] = True
     db.init_app(application)
 
     with application.app_context():
@@ -110,11 +114,24 @@ def revenue_forecast(revenue_frame):
 
 @pytest.fixture()
 def client(app):
-    from app.routes import forecasting
+    return CompatClient(app)
 
-    if "forecasting" not in app.blueprints:
-        app.register_blueprint(forecasting.bp)
-    return app.test_client()
+
+class CompatResponse:
+    def __init__(self, response):
+        self._response = response
+        self.status_code = response.status_code
+
+    def get_json(self):
+        return self._response.json()
+
+
+class CompatClient:
+    def __init__(self, app):
+        self._client = TestClient(app)
+
+    def get(self, path: str):
+        return CompatResponse(self._client.get(path))
 
 
 # ---------------------------------------------------------------------------
@@ -172,16 +189,10 @@ def pg_app():
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"no Postgres at {PG_URL}: {exc}")
 
-    application = Flask(__name__)
+    application = create_app("testing")
+    application.state.database_url = PG_URL
     application.config["SQLALCHEMY_DATABASE_URI"] = PG_URL
-    application.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    application.config["TESTING"] = True
     db.init_app(application)
-
-    from app.routes import customers, dashboard, forecasting, operations, revenue
-
-    for module in (dashboard, revenue, customers, operations, forecasting):
-        application.register_blueprint(module.bp)
 
     with application.app_context():
         db.drop_all()
@@ -199,4 +210,4 @@ def pg_ctx(pg_app):
 
 @pytest.fixture()
 def pg_client(pg_app):
-    return pg_app.test_client()
+    return CompatClient(pg_app)

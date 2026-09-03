@@ -107,10 +107,9 @@ export function Dashboard() {
         subtitle={`${filters.dateRange.startDate} to ${filters.dateRange.endDate}`}
       />
 
-      {/* Content area with flexible row heights */}
-      <div className="flex-1 p-3 flex flex-col gap-2 min-h-0 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
         {/* Row 1: KPIs - auto height */}
-        <div className="flex-shrink-0 grid grid-cols-4 gap-2">
+        <div className="grid flex-shrink-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <KPICard
             label="Total Revenue"
             value={kpis.totalRevenue?.value ?? null}

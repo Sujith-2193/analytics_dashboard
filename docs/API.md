@@ -3,7 +3,7 @@
 All endpoints are **HTTP GET**, return **JSON**, and require **no authentication**.
 CORS is open for `/api/*`. The base path is `/api`. In production the API is
 same-origin with the frontend; in development the Vite server proxies `/api` to
-Flask on port 5001.
+FastAPI on port 5001.
 
 ## Conventions
 

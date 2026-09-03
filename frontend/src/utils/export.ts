@@ -56,7 +56,7 @@ export function exportToCSV(data: ExportData): void {
   const rows: string[] = [];
 
   // Header info
-  rows.push(`Analytics Dashboard Export`);
+  rows.push(`SignalFlow Analytics Export`);
   rows.push(csv(`Date Range: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}`));
   rows.push(csv(`Generated: ${new Date().toLocaleString()}`));
   rows.push('');
@@ -150,7 +150,7 @@ export function exportToPDF(data: ExportData): void {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Analytics Dashboard Report</title>
+  <title>SignalFlow Analytics Report</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; }
     h1 { color: #1a1a2e; border-bottom: 2px solid #6366f1; padding-bottom: 10px; }
@@ -170,7 +170,7 @@ export function exportToPDF(data: ExportData): void {
   </style>
 </head>
 <body>
-  <h1>Analytics Dashboard Report</h1>
+  <h1>SignalFlow Analytics Report</h1>
   <div class="meta">
     <p>Date Range: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}</p>
     <p>Generated: ${new Date().toLocaleString()}</p>

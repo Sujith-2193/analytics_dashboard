@@ -17,23 +17,23 @@
 :root {
   /* Categorical. Fixed slot order is the colour-vision-deficiency mechanism;
      assign in order and never cycle. A 9th series folds into "Other". */
-  --color-chart-1: #2a78d6;  /* blue    */
-  --color-chart-2: #eb6834;  /* orange  */
-  --color-chart-3: #1baf7a;  /* aqua    */
-  --color-chart-4: #eda100;  /* yellow  */
-  --color-chart-5: #e87ba4;  /* magenta */
-  --color-chart-6: #008300;  /* green   */
-  --color-chart-7: #4a3aa7;  /* violet  */
-  --color-chart-8: #e34948;  /* red     */
+  --color-chart-1: #0f766e;  /* teal    */
+  --color-chart-2: #ea580c;  /* orange  */
+  --color-chart-3: #2563eb;  /* blue    */
+  --color-chart-4: #ca8a04;  /* amber   */
+  --color-chart-5: #be185d;  /* berry   */
+  --color-chart-6: #16a34a;  /* green   */
+  --color-chart-7: #7c3aed;  /* violet  */
+  --color-chart-8: #dc2626;  /* red     */
 
   /* Ordinal ramp for ORDERED categories only (funnel stages, tiers).
      Light tops out at five steps: a sixth cannot keep a visible lightness gap
      and still clear the contrast floor against white. */
-  --color-ordinal-1: #86b6ef;
-  --color-ordinal-2: #5598e7;
-  --color-ordinal-3: #2a78d6;
-  --color-ordinal-4: #1c5cab;
-  --color-ordinal-5: #104281;
+  --color-ordinal-1: #99f6e4;
+  --color-ordinal-2: #5eead4;
+  --color-ordinal-3: #14b8a6;
+  --color-ordinal-4: #0f766e;
+  --color-ordinal-5: #134e4a;
 
   /* Ink for a label sitting ON each ramp step.
      White throughout, Ryan's call 2026-08-09. Measured contrast against the
@@ -59,16 +59,16 @@
 
 @theme {
   /* Primary Colors - Blue */
-  --color-primary-50: #EFF6FF;
-  --color-primary-100: #DBEAFE;
-  --color-primary-200: #BFDBFE;
-  --color-primary-300: #93C5FD;
-  --color-primary-400: #60A5FA;
-  --color-primary-500: #3B82F6;
-  --color-primary-600: #2563EB;
-  --color-primary-700: #1D4ED8;
-  --color-primary-800: #1E40AF;
-  --color-primary-900: #1E3A8A;
+  --color-primary-50: #F0FDFA;
+  --color-primary-100: #CCFBF1;
+  --color-primary-200: #99F6E4;
+  --color-primary-300: #5EEAD4;
+  --color-primary-400: #2DD4BF;
+  --color-primary-500: #14B8A6;
+  --color-primary-600: #0D9488;
+  --color-primary-700: #0F766E;
+  --color-primary-800: #115E59;
+  --color-primary-900: #134E4A;
 
   /* Semantic Colors */
   --color-success: #10B981;
@@ -99,8 +99,8 @@ body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
-  background-color: #F9FAFB;
-  color: #111827;
+  background: #f6f8fb;
+  color: #18181b;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -118,14 +118,14 @@ body {
  * is what pushes steps out of the lightness band.
  * ------------------------------------------------------------------------- */
 html.dark {
-  --color-chart-1: #3987e5;
-  --color-chart-2: #d95926;
-  --color-chart-3: #199e70;
-  --color-chart-4: #c98500;
-  --color-chart-5: #d55181;
-  --color-chart-6: #008300;
-  --color-chart-7: #9085e9;
-  --color-chart-8: #e66767;
+  --color-chart-1: #2dd4bf;
+  --color-chart-2: #fb923c;
+  --color-chart-3: #60a5fa;
+  --color-chart-4: #facc15;
+  --color-chart-5: #f472b6;
+  --color-chart-6: #4ade80;
+  --color-chart-7: #a78bfa;
+  --color-chart-8: #f87171;
 
   /* Dark surface tolerates a sixth ordinal step; light does not. */
   --color-ordinal-1: #cde2fb;
@@ -150,8 +150,54 @@ html.dark {
 }
 
 html.dark body {
-  background-color: #111827;
+  background: #09090b;
   color: #F9FAFB;
+}
+
+.app-shell {
+  position: relative;
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.12), transparent 30%),
+    linear-gradient(315deg, rgba(234, 88, 12, 0.10), transparent 24%),
+    #f6f8fb;
+}
+
+.app-shell::before {
+  animation: gridDrift 18s linear infinite;
+  background-image:
+    linear-gradient(rgba(15, 118, 110, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 118, 110, 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.dark .app-shell {
+  background:
+    linear-gradient(135deg, rgba(45, 212, 191, 0.10), transparent 30%),
+    linear-gradient(315deg, rgba(251, 146, 60, 0.10), transparent 24%),
+    #09090b;
+}
+
+.dark .app-shell::before {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+}
+
+.surface-card {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(24, 24, 27, 0.10);
+  box-shadow: 0 16px 40px -28px rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(16px);
+}
+
+.dark .surface-card {
+  background: rgba(24, 24, 27, 0.72);
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 20px 50px -30px rgba(0, 0, 0, 0.85);
 }
 
 /* Light mode overrides - invert bg-gray-900 to bg-white, etc */
@@ -284,6 +330,11 @@ html:not(.dark) .text-gray-200 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes gridDrift {
+  from { background-position: 0 0; }
+  to { background-position: 42px 42px; }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -319,12 +370,13 @@ html:not(.dark) .text-gray-200 {
 
 /* Card hover effect */
 .card-hover {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .card-hover:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  border-color: rgba(20, 184, 166, 0.35);
+  box-shadow: 0 18px 45px -30px rgba(15, 118, 110, 0.65), 0 10px 25px -20px rgba(0, 0, 0, 0.25);
 }
 
 /* Number formatting for metrics */

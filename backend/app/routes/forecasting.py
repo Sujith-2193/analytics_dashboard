@@ -1,4 +1,4 @@
-from flask import Blueprint, request
+from app.fastapi_compat import Blueprint, request
 from datetime import datetime
 import pandas as pd
 from app import db
